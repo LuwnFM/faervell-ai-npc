@@ -1,0 +1,58 @@
+sources:
+  - id: faervell_wiki_root
+    title: "Официальная энциклопедия Фаервелла"
+    kind: url
+    location: "https://faervellrp.fandom.com/ru/wiki/FirewellRP_%D0%92%D0%B8%D0%BA%D0%B8"
+    corpus: LORE
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+    crawl: true
+    max_pages: 1200
+
+  - id: faervell_economy_wiki
+    title: "Экономика Фаервелла"
+    kind: url
+    location: "https://faervellrp.fandom.com/ru/wiki/%D0%AD%D0%9A%D0%9E%D0%9D%D0%9E%D0%9C%D0%98%D0%9A%D0%90?so=search"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: faervell_market_calculator
+    title: "Калькулятор рыночной цены"
+    kind: url
+    location: "https://z1kk06745.github.io/fw-economy/"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: faervell_economy_guide
+    title: "Экономический путеводитель"
+    kind: url
+    location: "https://docs.google.com/spreadsheets/u/0/d/1qOqm_5noHKOsa2sWxSuW3JnGL39YNbafOo_HPdmOFXQ/htmlview"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: faervell_economic_zones
+    title: "Экономические зоны и валюты"
+    kind: local
+    location: "data/project_sources/Экономические-зоны-(валюты),-НЕДОРАБОТАНО.txt"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: faervell_mechanics_tables
+    title: "Таблицы механик Фаервелла"
+    kind: url
+    location: "https://faervellrp.fandom.com/ru/wiki/Таблицы_Механик"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: architecture_source
+    title: "Архитектура ИИ-NPC Фаервелл 1.6"
+    kind: local
+    location: "docs/architecture-source.md"
+    corpus: INTERNAL
+    access: GM_ONLY
+    disclosure_tier: RESTRICTED

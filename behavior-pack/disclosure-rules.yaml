@@ -1,0 +1,13 @@
+tiers:
+  FREE:
+    allowed_modes: [FREE]
+  USEFUL:
+    allowed_modes: [FREE, COINS, ITEM, SERVICE]
+  VALUABLE:
+    allowed_modes: [COINS, ITEM, SERVICE, QUEST, TRUST]
+  RARE:
+    allowed_modes: [QUEST, TRUST, GM_APPROVAL]
+  RESTRICTED:
+    allowed_modes: [GM_APPROVAL]
+mechanics_always_free: true
+require_player_raised_topic_for_lore: true

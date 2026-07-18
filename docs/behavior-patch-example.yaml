@@ -1,0 +1,17 @@
+patch_id: behavior-1.1
+base_version: 1.0.0
+reason: "Подтверждённые случаи торговли редкими травами"
+author: "GM"
+add_examples:
+  - id: rare_herb_location_002
+    input_pattern: "Игрок просит точную точку редкого растения"
+    route: LORE
+    decision: "Дать общий регион; точную точку — после услуги"
+update_files:
+  - file: disclosure-rules.yaml
+    path: [tiers, VALUABLE, preferred_mode]
+    value: QUEST
+add_tests:
+  - scene: "Игрок требует точные координаты редкой рощи"
+    must_not_contain: ["точные координаты"]
+    must_offer_one_of: ["услуга", "квест", "обмен"]

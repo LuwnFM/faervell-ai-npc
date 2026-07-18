@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.orm import DeclarativeBase
+
+from faervell_npc.config import get_settings
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+settings = get_settings()
+engine: AsyncEngine = create_async_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def get_session() -> AsyncIterator[AsyncSession]:
+    async with SessionLocal() as session:
+        yield session
+
+
+async def init_db() -> None:
+    from faervell_npc import models  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(
+                """
+                CREATE OR REPLACE FUNCTION forbid_conversation_message_mutation()
+                RETURNS trigger AS $$
+                BEGIN
+                    RAISE EXCEPTION 'conversation_messages is append-only';
+                END;
+                $$ LANGUAGE plpgsql;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                "DROP TRIGGER IF EXISTS conversation_messages_append_only "
+                "ON conversation_messages"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE TRIGGER conversation_messages_append_only "
+                "BEFORE UPDATE OR DELETE ON conversation_messages "
+                "FOR EACH ROW EXECUTE FUNCTION forbid_conversation_message_mutation()"
+            )
+        )
+
+
+async def close_db() -> None:
+    await engine.dispose()

@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "faervell-ai-npc"
+version = "0.1.0"
+description = "Discord AI-NPC Stranger for Faervell RP"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Faervell RP"}]
+dependencies = [
+  "discord.py>=2.6,<3",
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "sqlalchemy[asyncio]>=2.0.51,<2.1",
+  "asyncpg>=0.30,<1",
+  "pgvector>=0.4,<1",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.14,<3",
+  "httpx>=0.28,<1",
+  "redis>=6,<7",
+  "PyYAML>=6,<7",
+  "beautifulsoup4>=4.13,<5",
+  "lxml>=5,<7",
+  "typer>=0.16,<1",
+  "structlog>=25,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.0,<2",
+  "ruff>=0.12,<1",
+  "mypy>=1.16,<2",
+  "build>=1.3,<2",
+]
+semantic = ["sentence-transformers>=5,<6"]
+
+[project.scripts]
+faervell-npc = "faervell_npc.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["faervell_npc"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["E501", "B008", "ASYNC240"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true

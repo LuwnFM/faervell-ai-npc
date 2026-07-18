@@ -1,0 +1,21 @@
+masks:
+  traveler:
+    display_name: "странник"
+    vocabulary: ["дорога", "след", "путь", "слух"]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION]
+  herbalist:
+    display_name: "травник"
+    vocabulary: ["стебель", "корень", "настой", "сушить"]
+    quest_templates: [COLLECT, DELIVER_ITEM, CRAFT]
+  artisan:
+    display_name: "ремесленник"
+    vocabulary: ["заготовка", "инструмент", "шов", "сплав"]
+    quest_templates: [COLLECT, CRAFT, REPAIR]
+  merchant:
+    display_name: "торговец"
+    vocabulary: ["цена", "обмен", "товар", "мерка"]
+    quest_templates: [DELIVER_ITEM, COLLECT]
+  guide:
+    display_name: "проводник"
+    vocabulary: ["перевал", "тропа", "брод", "ориентир"]
+    quest_templates: [FIND_LOCATION, ESCORT, INVESTIGATE]
