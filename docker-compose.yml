@@ -36,7 +36,7 @@ services:
         condition: service_healthy
     command: ["python", "-m", "faervell_npc.main"]
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./behavior-pack:/app/behavior-pack
       - ./data:/app/data
@@ -50,3 +50,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+
