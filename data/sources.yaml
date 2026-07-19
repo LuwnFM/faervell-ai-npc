@@ -8,11 +8,28 @@ sources:
     disclosure_tier: FREE
     crawl: true
     max_pages: 1200
+    min_documents: 500
+
+  - id: faervell_calendar_home
+    title: "Текущая дата и календарь Фаервелла"
+    kind: url
+    location: "https://faervellrp.fandom.com/ru/wiki/FirewellRP_%D0%92%D0%B8%D0%BA%D0%B8"
+    corpus: LORE
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
+
+  - id: faervell_mechanics_tables
+    title: "Таблицы механик Фаервелла"
+    kind: url
+    location: "https://faervellrp.fandom.com/ru/wiki/%D0%A2%D0%B0%D0%B1%D0%BB%D0%B8%D1%86%D1%8B_%D0%9C%D0%B5%D1%85%D0%B0%D0%BD%D0%B8%D0%BA"
+    corpus: MECHANICS
+    access: PUBLIC_CANON
+    disclosure_tier: FREE
 
   - id: faervell_economy_wiki
     title: "Экономика Фаервелла"
     kind: url
-    location: "https://faervellrp.fandom.com/ru/wiki/%D0%AD%D0%9A%D0%9E%D0%9D%D0%9E%D0%9C%D0%98%D0%9A%D0%90?so=search"
+    location: "https://faervellrp.fandom.com/ru/wiki/%D0%AD%D0%9A%D0%9E%D0%9D%D0%9E%D0%9C%D0%98%D0%9A%D0%90"
     corpus: MECHANICS
     access: PUBLIC_CANON
     disclosure_tier: FREE
@@ -36,15 +53,7 @@ sources:
   - id: faervell_economic_zones
     title: "Экономические зоны и валюты"
     kind: local
-    location: "data/project_sources/Экономические-зоны-(валюты),-НЕДОРАБОТАНО.txt"
-    corpus: MECHANICS
-    access: PUBLIC_CANON
-    disclosure_tier: FREE
-
-  - id: faervell_mechanics_tables
-    title: "Таблицы механик Фаервелла"
-    kind: url
-    location: "https://faervellrp.fandom.com/ru/wiki/Таблицы_Механик"
+    location: "data/project_sources/#U042d#U043a#U043e#U043d#U043e#U043c#U0438#U0447#U0435#U0441#U043a#U0438#U0435-#U0437#U043e#U043d#U044b-(#U0432#U0430#U043b#U044e#U0442#U044b),-#U041d#U0415#U0414#U041e#U0420#U0410#U0411#U041e#U0422#U0410#U041d#U041e.txt"
     corpus: MECHANICS
     access: PUBLIC_CANON
     disclosure_tier: FREE

@@ -8,19 +8,17 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_ACTOR_MODELS = [
+    # This is only a preferred order, not a free-model allowlist. The live OpenRouter
+    # catalogue contributes every other free text model that is not explicitly blocked.
     "nvidia/nemotron-3-super-120b-a12b:free",
     "openai/gpt-oss-120b:free",
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "deepseek/deepseek-v4-flash",
-    "openai/gpt-oss-120b",
-    "mistralai/ministral-14b-2512",
 ]
 DEFAULT_PLANNER_MODELS = [
     "deepseek/deepseek-v4-flash",
-    "openai/gpt-oss-120b:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "openai/gpt-oss-120b",
-    "mistralai/ministral-14b-2512",
+    "openai/gpt-oss-120b:free",
 ]
 DEFAULT_MODEL_BLOCKLIST = [
     "openrouter/free",
@@ -39,6 +37,7 @@ class Settings(BaseSettings):
     discord_guild_id: int | None = None
     discord_gm_role_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     discord_admin_channel_id: int | None = None
+    discord_gm_review_channel_id: int | None = None
     discord_character_registry_channel_id: int | None = None
     discord_command_prefix: str = "!"
 
@@ -60,6 +59,9 @@ class Settings(BaseSettings):
         default_factory=lambda: list(DEFAULT_MODEL_BLOCKLIST)
     )
     openrouter_allow_paid_fallback: bool = True
+    openrouter_dynamic_catalog: bool = True
+    openrouter_catalog_ttl_seconds: int = Field(default=1800, ge=60)
+    openrouter_max_catalog_candidates: int = Field(default=24, ge=3, le=100)
     openrouter_max_prompt_price_per_million: float = Field(default=0.20, ge=0.0)
     openrouter_max_completion_price_per_million: float = Field(default=0.20, ge=0.0)
     openrouter_max_request_price_usd: float = Field(default=0.0, ge=0.0)
@@ -89,6 +91,8 @@ class Settings(BaseSettings):
     traveler_summon_move_chance: float = Field(default=0.75, ge=0.0, le=1.0)
     traveler_cross_location_min_score: float = Field(default=0.58, ge=0.0, le=1.0)
     traveler_auto_register_locations: bool = True
+    traveler_enforce_startup_lock: bool = True
+    traveler_startup_lock_channel_id: int | None = 1488544832950374481
     traveler_rp_category_ids: Annotated[list[int], NoDecode] = Field(
         default_factory=lambda: [
             682909341300293662,
@@ -101,6 +105,15 @@ class Settings(BaseSettings):
         ]
     )
     traveler_events_category_id: int | None = 1058403455934398495
+    traveler_manual_only_category_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=lambda: [730030732185043004, 1490668605594013776]
+    )
+    knowledge_auto_ingest: bool = True
+    knowledge_min_wiki_documents: int = Field(default=500, ge=1)
+    knowledge_stale_hours: int = Field(default=24, ge=1)
+    fandom_api_concurrency: int = Field(default=4, ge=1, le=12)
+    discord_model_footer_enabled: bool = True
+    discord_regeneration_limit: int = Field(default=1, ge=0, le=20)
     character_match_threshold: float = 0.22
     character_match_margin: float = 0.04
 
@@ -110,8 +123,10 @@ class Settings(BaseSettings):
     @field_validator(
         "discord_guild_id",
         "discord_admin_channel_id",
+        "discord_gm_review_channel_id",
         "discord_character_registry_channel_id",
         "traveler_events_category_id",
+        "traveler_startup_lock_channel_id",
         mode="before",
     )
     @classmethod
@@ -137,6 +152,7 @@ class Settings(BaseSettings):
         "planner_models",
         "model_blocklist",
         "traveler_rp_category_ids",
+        "traveler_manual_only_category_ids",
         mode="before",
     )
     @classmethod
@@ -151,7 +167,7 @@ class Settings(BaseSettings):
         return value
 
     def filter_allowed_models(self, models: list[str]) -> list[str]:
-        """Return a stable, de-duplicated model list that cannot escape the configured policy."""
+        """Return a stable preferred list after applying only the explicit blocklist."""
         blocked = [item.casefold().strip() for item in self.model_blocklist if item.strip()]
         accepted: list[str] = []
         seen: set[str] = set()

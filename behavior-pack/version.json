@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "base_architecture": "1.6",
-  "updated_at": "2026-07-17",
-  "description": "Initial behavior pack for the Faervell Stranger"
+  "updated_at": "2026-07-19",
+  "description": "Faervell Stranger v0.7 behavior pack: grounded lore, varied stagecraft, strict identity boundaries"
 }

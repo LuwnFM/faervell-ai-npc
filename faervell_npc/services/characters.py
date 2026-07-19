@@ -57,6 +57,9 @@ _PRESENTATION_PATTERNS = (
     re.compile(
         r"(?u)(?:^|[.!?]\s*)[Яя]\s+([А-ЯЁA-Z][А-ЯЁа-яёA-Za-z'’\-]{1,40})(?=[,.!?\s]|$)"
     ),
+ )
+_PLAIN_NAME_RE = re.compile(
+    r"(?u)^\s*([А-ЯЁA-Z][А-ЯЁа-яёA-Za-z'’\-]{1,40}(?:\s+[А-ЯЁA-Z][А-ЯЁа-яёA-Za-z'’\-]{1,40}){0,3})\s*[.!?]?\s*$"
 )
 _APPEARANCE_STEMS = {
     "внешность",
@@ -532,6 +535,15 @@ class CharacterRegistryService:
                 presented_name = CharacterRegistryService.clean_presented_name(match.group(1))
                 break
 
+        if presented_name is None:
+            plain = _PLAIN_NAME_RE.match(text)
+            if plain:
+                candidate = CharacterRegistryService.clean_presented_name(plain.group(1))
+                # Reject common one-word replies that merely start with a capital letter.
+                blocked = {"Привет", "Да", "Нет", "Хорошо", "Ладно", "Спасибо", "Говори"}
+                if candidate not in blocked:
+                    presented_name = candidate
+
         lowered_tokens = set(re.findall(r"[а-яёa-z]+", text.casefold()))
         appearance_hits = sum(
             1
@@ -564,10 +576,10 @@ class CharacterRegistryService:
         return float(value)
 
     def _pending_id(self, incoming: IncomingMessage, scene: SceneConfig) -> str:
+        del scene
         return "pending:" + self._digest(
             incoming.guild_id,
             incoming.author_discord_id,
-            scene.scene_id,
         )
 
     def _provisional_id(
@@ -576,10 +588,10 @@ class CharacterRegistryService:
         scene: SceneConfig,
         presented_name: str,
     ) -> str:
+        del scene
         return "provisional:" + self._digest(
             incoming.guild_id,
             incoming.author_discord_id,
-            scene.scene_id,
             self.normalize_name(presented_name),
         )
 

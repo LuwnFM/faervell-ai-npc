@@ -79,13 +79,14 @@ class PresenceService:
             if current_scene is not None and not current_scene.enabled:
                 current_scene = None
 
-        if current_scene is None:
+        if current_scene is None and not presence.movement_locked:
             self._clear_current(presence)
-            if presence.movement_locked:
-                presence.movement_locked = False
-                presence.locked_channel_id = None
 
-        if presence.movement_locked and presence.locked_channel_id is None:
+        if self.settings.traveler_enforce_startup_lock and self.settings.traveler_startup_lock_channel_id:
+            presence.movement_locked = True
+            presence.locked_channel_id = str(self.settings.traveler_startup_lock_channel_id)
+            self._clear_next(presence)
+        elif presence.movement_locked and presence.locked_channel_id is None:
             presence.movement_locked = False
 
         return presence
@@ -240,6 +241,14 @@ class PresenceService:
         reason: str,
     ) -> PresenceTransition:
         presence = await self.ensure_presence(session, guild_id=guild_id)
+        if (
+            presence.movement_locked
+            and presence.locked_channel_id
+            and presence.locked_channel_id != scene.channel_id
+        ):
+            raise ValueError(
+                f"Странник заперт в канале {presence.locked_channel_id}; переход запрещён"
+            )
         previous_channel_id = presence.current_channel_id
         previous_location_name = presence.current_location_name
         self._apply_current_scene(presence, scene)
@@ -257,6 +266,24 @@ class PresenceService:
             arrival_announcement_enabled=scene.arrival_announcement_enabled,
             reason=reason,
         )
+
+    async def enforce_startup_lock(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        scene: SceneConfig,
+    ) -> TravelerPresence:
+        """Hard-reset presence to the configured test channel on every process start."""
+        configured = self.settings.traveler_startup_lock_channel_id
+        if configured and scene.channel_id != str(configured):
+            raise ValueError("startup lock scene does not match configured channel")
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        presence.movement_locked = True
+        presence.locked_channel_id = scene.channel_id
+        self._apply_current_scene(presence, scene)
+        self._clear_next(presence)
+        return presence
 
     async def clear_destination(
         self,
@@ -301,6 +328,15 @@ class PresenceService:
         scene: SceneConfig | None = None,
     ) -> TravelerPresence:
         presence = await self.ensure_presence(session, guild_id=guild_id)
+        # In the v0.7 test profile the startup lock is a hard safety boundary, not merely
+        # a saved preference. It can only be disabled through configuration and a restart.
+        if not enabled and self.settings.traveler_enforce_startup_lock:
+            presence.movement_locked = True
+            if self.settings.traveler_startup_lock_channel_id is not None:
+                presence.locked_channel_id = str(self.settings.traveler_startup_lock_channel_id)
+            self._clear_next(presence)
+            return presence
+
         presence.movement_locked = enabled
         if enabled:
             if scene is None:
@@ -347,6 +383,7 @@ class PresenceService:
                         select(SceneConfig).where(
                             SceneConfig.guild_id == guild_id,
                             SceneConfig.enabled.is_(True),
+                            SceneConfig.automatic_appearance_allowed.is_(True),
                             SceneConfig.channel_id != presence.current_channel_id,
                             SceneConfig.appearance_probability > 0,
                         )

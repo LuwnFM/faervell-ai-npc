@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from sqlalchemy import Float, cast, select
+from sqlalchemy import Float, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from faervell_npc.config import get_settings
@@ -139,13 +139,28 @@ class MemoryService:
         self,
         session: AsyncSession,
         scene_id: str,
+        *,
+        character_id: str | None = None,
         limit: int | None = None,
     ) -> list[ConversationMessage]:
+        """Return only the current dialogue lane.
+
+        Other players in the same RP channel must never leak into this character's
+        context. NPC messages remain visible because they establish the reply chain.
+        """
         limit = limit or self.settings.max_recent_messages
+        filters = [ConversationMessage.scene_id == scene_id]
+        if character_id:
+            filters.append(
+                or_(
+                    ConversationMessage.speaker_type == "NPC",
+                    ConversationMessage.character_id == character_id,
+                )
+            )
         rows = (
             await session.execute(
                 select(ConversationMessage)
-                .where(ConversationMessage.scene_id == scene_id)
+                .where(*filters)
                 .order_by(ConversationMessage.created_at.desc())
                 .limit(limit)
             )

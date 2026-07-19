@@ -85,9 +85,7 @@ def test_openrouter_price_ceiling_defaults_to_twenty_cents_per_million() -> None
 def test_deepseek_v4_flash_is_preferred_paid_planner() -> None:
     settings = Settings()
     assert settings.effective_planner_models[0] == "deepseek/deepseek-v4-flash"
-    assert settings.effective_actor_models.index(
-        "deepseek/deepseek-v4-flash"
-    ) < settings.effective_actor_models.index("openai/gpt-oss-120b")
+    assert "deepseek/deepseek-v4-flash" in settings.effective_actor_models
     assert settings.openrouter_planner_reasoning_effort == "high"
 
 

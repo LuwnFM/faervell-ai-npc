@@ -82,6 +82,23 @@ async def init_db() -> None:
                 "ADD COLUMN IF NOT EXISTS locked_channel_id VARCHAR(32)"
             )
         )
+        await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS category_id VARCHAR(32)"))
+        await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS category_name VARCHAR(256)"))
+        await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS location_path VARCHAR(512)"))
+        await conn.execute(
+            text(
+                "ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS "
+                "automatic_appearance_allowed BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        await conn.execute(text("ALTER TABLE model_calls ADD COLUMN IF NOT EXISTS http_status INTEGER"))
+        await conn.execute(text("ALTER TABLE model_calls ADD COLUMN IF NOT EXISTS selection_reason TEXT"))
+        await conn.execute(
+            text("ALTER TABLE model_calls ADD COLUMN IF NOT EXISTS request_metadata JSONB NOT NULL DEFAULT '{}'::jsonb")
+        )
+        await conn.execute(
+            text("ALTER TABLE model_calls ADD COLUMN IF NOT EXISTS response_metadata JSONB NOT NULL DEFAULT '{}'::jsonb")
+        )
         await conn.execute(
             text(
                 """

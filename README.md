@@ -378,3 +378,37 @@ Production no longer uses the random `openrouter/free` router. The bot sends an 
 ordered model allowlist, blocks rejected models by slug, and applies a hard OpenRouter
 provider price ceiling to both input and output tokens. DeepSeek V4 Flash is the preferred
 paid planner and the first paid actor fallback. See `docs/v0.6-model-policy.md`.
+
+## v0.7.0: обязательные production-настройки
+
+Релиз v0.7 объединяет исправления RAG, Fandom, персонажей, RP-географии, квестов, GM approval, OpenRouter и Discord-feedback. Полный список — `docs/v0.7-release.md`.
+
+В тестовом режиме Странник при **каждом запуске** жёстко возвращается и блокируется в канале `1488544832950374481`:
+
+```env
+TRAVELER_ENFORCE_STARTUP_LOCK=true
+TRAVELER_STARTUP_LOCK_CHANNEL_ID=1488544832950374481
+```
+
+Пока этот флаг включён, `/stranger movement_lock enabled:false`, `/stranger move_here` и `/stranger appear_now` не выпускают его в другой канал. Для будущего обычного путешествия нужно изменить флаг в `.env` и перезапустить приложение.
+
+После установки:
+
+```text
+/stranger gm_channel
+/stranger locations_sync
+/stranger source_ingest
+/stranger knowledge_status
+/stranger startup_lock_status
+```
+
+`ACTOR_MODELS` и `PLANNER_MODELS` теперь являются только предпочтительным порядком. Бот читает живой каталог OpenRouter, допускает все бесплатные текстовые модели кроме `MODEL_BLOCKLIST`, а платные — только в пределах ценовых лимитов.
+
+Последнее сообщение каждого ответа содержит:
+
+```text
+||Чтобы продолжить разговор со Странником, упомяните его или ответьте на его пост.||
+-# Модель: `provider/model`
+```
+
+К нему прикреплены `Нравится`, `Не нравится` и `Перегенерировать`. Перегенерация доступна GM/администраторам, использует другую бесплатную модель и редактирует уже отправленные сообщения. Лимит задаётся `/stranger regeneration_limit`.

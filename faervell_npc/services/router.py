@@ -65,6 +65,12 @@ class IntentRouter:
             )
         if mechanics:
             return RouteDecision(route=Route.MECHANICS, reason="mechanics_keywords", confidence=0.93)
-        if lore or clean.endswith("?") and _contains_any(clean, ["кто", "где", "почему", "что известно"]):
+        question_words = [
+            "кто", "где", "почему", "что", "какой", "какая", "какое", "когда",
+            "с кем", "сколько", "дата", "число", "год", "сезон", "король", "правитель",
+        ]
+        if lore or (clean.endswith("?") and _contains_any(clean, question_words)) or _contains_any(clean, [
+            "кто король", "где находится", "с кем воюет", "какое сейчас число", "какой сейчас год",
+        ]):
             return RouteDecision(route=Route.LORE, reason="lore_question", confidence=0.82)
         return RouteDecision(route=Route.CHAT, reason="ordinary_dialogue", confidence=0.90)

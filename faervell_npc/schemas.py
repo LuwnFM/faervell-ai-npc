@@ -138,6 +138,7 @@ class ToolRequest(BaseModel):
         "validate_quest",
         "commit_quest",
         "create_admin_question",
+        "create_gm_review",
     ]
     arguments: str = "{}"
     purpose: str
@@ -217,6 +218,9 @@ class SceneContext(BaseModel):
     scene_id: str
     location_id: str | None = None
     location_name: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    location_path: str | None = None
     profession_mask_id: str = "traveler"
     recognition_mode: str = "SUBTLE_RECOGNITION"
     player_name: str
@@ -237,3 +241,6 @@ class ProcessResult(BaseModel):
     planner_escalated: bool = False
     guard_passed: bool = True
     citations: list[dict[str, str | None]] = Field(default_factory=list)
+    scene_context: SceneContext | None = None
+    model_selection_reason: str | None = None
+    gm_review_request_id: str | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,15 +16,97 @@ from faervell_npc.db import SessionLocal
 from faervell_npc.models import (
     CharacterBinding,
     ConversationMessage,
+    GMReviewRequest,
+    GuildRuntimeSettings,
     KnowledgeGap,
+    Quest,
+    ResponseBundle,
+    ResponseFeedback,
     SceneConfig,
 )
 from faervell_npc.runtime import Runtime
-from faervell_npc.schemas import IncomingMessage
+from faervell_npc.schemas import ActorPacket, IncomingMessage, ProcessResult, SceneContext
 from faervell_npc.services.behavior import BehaviorManager
 from faervell_npc.services.characters import CharacterSheetParser
 from faervell_npc.services.ingest import SourceIngestor
 from faervell_npc.services.presence import PresenceTransition
+from faervell_npc.services.stagecraft import arrival_activity
+
+
+class ResponseFeedbackView(discord.ui.View):
+    def __init__(self, bot: FaervellBot, bundle_id: str, *, regeneration_enabled: bool = True) -> None:
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.bundle_id = bundle_id
+
+        like = discord.ui.Button(  # type: ignore[var-annotated]
+            label="Нравится",
+            emoji="👍",
+            style=discord.ButtonStyle.success,
+            custom_id=f"stranger:like:{bundle_id}",
+        )
+        dislike = discord.ui.Button(  # type: ignore[var-annotated]
+            label="Не нравится",
+            emoji="👎",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"stranger:dislike:{bundle_id}",
+        )
+        regenerate = discord.ui.Button(  # type: ignore[var-annotated]
+            label="Перегенерировать",
+            emoji="🔄",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"stranger:regenerate:{bundle_id}",
+            disabled=not regeneration_enabled,
+        )
+
+        async def rate_callback(interaction: discord.Interaction, rating: int) -> None:
+            await self.bot.record_response_feedback(interaction, self.bundle_id, rating)
+
+        async def like_callback(interaction: discord.Interaction) -> None:
+            await rate_callback(interaction, 1)
+
+        async def dislike_callback(interaction: discord.Interaction) -> None:
+            await rate_callback(interaction, -1)
+
+        async def regenerate_callback(interaction: discord.Interaction) -> None:
+            await self.bot.regenerate_response(interaction, self.bundle_id)
+
+        like.callback = like_callback  # type: ignore[method-assign]
+        dislike.callback = dislike_callback  # type: ignore[method-assign]
+        regenerate.callback = regenerate_callback  # type: ignore[method-assign]
+        self.add_item(like)
+        self.add_item(dislike)
+        self.add_item(regenerate)
+
+
+class GMReviewView(discord.ui.View):
+    def __init__(self, bot: FaervellBot, review_id: str) -> None:
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.review_id = review_id
+        approve = discord.ui.Button(  # type: ignore[var-annotated]
+            label="Одобрить",
+            emoji="✅",
+            style=discord.ButtonStyle.success,
+            custom_id=f"stranger:gm:approve:{review_id}",
+        )
+        reject = discord.ui.Button(  # type: ignore[var-annotated]
+            label="Отклонить",
+            emoji="❌",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"stranger:gm:reject:{review_id}",
+        )
+
+        async def approve_callback(interaction: discord.Interaction) -> None:
+            await self.bot.decide_gm_review(interaction, self.review_id, approved=True)
+
+        async def reject_callback(interaction: discord.Interaction) -> None:
+            await self.bot.decide_gm_review(interaction, self.review_id, approved=False)
+
+        approve.callback = approve_callback  # type: ignore[method-assign]
+        reject.callback = reject_callback  # type: ignore[method-assign]
+        self.add_item(approve)
+        self.add_item(reject)
 
 
 class StrangerCommands(commands.Cog):
@@ -201,12 +284,16 @@ class StrangerCommands(commands.Cog):
             if scene is None or not scene.enabled:
                 await interaction.response.send_message("Сначала включите сцену.", ephemeral=True)
                 return
-            await self.runtime.presence.set_current_scene(
-                session,
-                guild_id=str(interaction.guild_id),
-                scene=scene,
-                reason="ручное перемещение GM",
-            )
+            try:
+                await self.runtime.presence.set_current_scene(
+                    session,
+                    guild_id=str(interaction.guild_id),
+                    scene=scene,
+                    reason="ручное перемещение GM",
+                )
+            except ValueError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
             await session.commit()
         await interaction.response.send_message(
             f"Странник теперь находится в локации **{scene.location_name or 'без названия'}**.",
@@ -260,12 +347,16 @@ class StrangerCommands(commands.Cog):
                     scene.location_name = channel.name
                 if not scene.location_id:
                     scene.location_id = self._slug(channel.name)
-            transition = await self.runtime.presence.set_current_scene(
-                session,
-                guild_id=str(interaction.guild_id),
-                scene=scene,
-                reason="немедленное появление по команде GM",
-            )
+            try:
+                transition = await self.runtime.presence.set_current_scene(
+                    session,
+                    guild_id=str(interaction.guild_id),
+                    scene=scene,
+                    reason="немедленное появление по команде GM",
+                )
+            except ValueError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
             await session.commit()
 
         posted, error = await self.bot._announce_arrival(transition)
@@ -334,8 +425,14 @@ class StrangerCommands(commands.Cog):
 
         if enabled:
             text = (
-                f"Странник временно закреплён в **{presence.current_location_name or 'этом канале'}**. "
+                f"Странник закреплён в **{presence.current_location_name or 'этом канале'}**. "
                 "Случайные переходы и призывы из других локаций не сработают."
+            )
+        elif presence.movement_locked:
+            text = (
+                "Ограничение не снято: включён обязательный тестовый startup-lock. "
+                f"Странник остаётся в <#{presence.locked_channel_id}> до отключения "
+                "TRAVELER_ENFORCE_STARTUP_LOCK и перезапуска."
             )
         else:
             text = "Ограничение снято. Странник снова может перемещаться между локациями."
@@ -580,6 +677,82 @@ class StrangerCommands(commands.Cog):
             f"Slash-команды синхронизированы: **{count}**.", ephemeral=True
         )
 
+    @stranger.command(
+        name="gm_channel",
+        description="Назначить текущий канал для заявок на одобрение ГМ",
+    )
+    async def gm_channel(self, interaction: discord.Interaction) -> None:
+        if not await self._require_gm(interaction):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            return
+        async with SessionLocal() as session:
+            runtime = await session.get(GuildRuntimeSettings, str(interaction.guild_id))
+            if runtime is None:
+                runtime = GuildRuntimeSettings(guild_id=str(interaction.guild_id))
+                session.add(runtime)
+            runtime.gm_review_channel_id = str(interaction.channel_id)
+            await session.commit()
+        await interaction.response.send_message(
+            "Этот канал назначен каналом заявок Странника для ГМ.", ephemeral=True
+        )
+
+    @stranger.command(
+        name="regeneration_limit",
+        description="Задать число разрешённых перегенераций одного ответа",
+    )
+    async def regeneration_limit(self, interaction: discord.Interaction, uses: int) -> None:
+        if not await self._require_gm(interaction):
+            return
+        uses = max(0, min(20, uses))
+        if interaction.guild_id is None:
+            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            return
+        async with SessionLocal() as session:
+            runtime = await session.get(GuildRuntimeSettings, str(interaction.guild_id))
+            if runtime is None:
+                runtime = GuildRuntimeSettings(guild_id=str(interaction.guild_id))
+                session.add(runtime)
+            runtime.regeneration_limit = uses
+            await session.commit()
+        await interaction.response.send_message(
+            f"Лимит перегенераций одного ответа: **{uses}**.", ephemeral=True
+        )
+
+    @stranger.command(
+        name="startup_lock_status",
+        description="Показать обязательный канал блокировки после запуска",
+    )
+    async def startup_lock_status(self, interaction: discord.Interaction) -> None:
+        channel_id = self.settings.traveler_startup_lock_channel_id
+        await interaction.response.send_message(
+            "Блокировка при каждом запуске: "
+            + (f"**включена**, канал <#{channel_id}>." if channel_id else "**выключена**."),
+            ephemeral=True,
+        )
+
+    @stranger.command(
+        name="knowledge_status",
+        description="Проверить полноту и свежесть локальной базы знаний",
+    )
+    async def knowledge_status(self, interaction: discord.Interaction) -> None:
+        if not await self._require_gm(interaction):
+            return
+        async with SessionLocal() as session:
+            info = await self.runtime.knowledge.diagnostics(session)
+        text = (
+            f"Документов: **{info.documents}**, фрагментов: **{info.chunks}**, "
+            f"страниц основной вики: **{info.wiki_documents}**.\n"
+            f"Состояние: **{'готово' if info.healthy else 'нужен импорт'}** — `{info.reason}`.\n"
+            f"Последний импорт: **{info.latest_run_status or 'не запускался'}**."
+        )
+        if info.latest_run_errors:
+            text += "\nПервые ошибки: " + "; ".join(
+                str(item.get("error") or item)[:140] for item in info.latest_run_errors[:3]
+            )
+        await interaction.response.send_message(text, ephemeral=True)
+
     @stranger.command(name="status", description="Показать состояние сцены и сервисов")
     async def status(self, interaction: discord.Interaction) -> None:
         async with SessionLocal() as session:
@@ -721,6 +894,8 @@ class FaervellBot(commands.Bot):
         self.settings = settings
         self._registry_bootstrap_done = False
         self._locations_bootstrap_done = False
+        self._knowledge_bootstrap_done = False
+        self._views_restored = False
         self._presence_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
@@ -786,14 +961,34 @@ class FaervellBot(commands.Bot):
             and category_id == self.settings.traveler_events_category_id
         )
 
+    def _location_channels(
+        self,
+        guild: discord.Guild,
+    ) -> list[discord.TextChannel | discord.Thread]:
+        channels: list[discord.TextChannel | discord.Thread] = list(guild.text_channels)
+        seen = {channel.id for channel in channels}
+        for thread in guild.threads:
+            if thread.id not in seen:
+                channels.append(thread)
+                seen.add(thread.id)
+        return channels
+
     def _automatic_destination_ids(
         self,
         guild: discord.Guild,
         *,
         event_locations_enabled: bool,
     ) -> set[str]:
+        startup_lock = (
+            str(self.settings.traveler_startup_lock_channel_id)
+            if self.settings.traveler_enforce_startup_lock
+            and self.settings.traveler_startup_lock_channel_id
+            else None
+        )
+        if startup_lock:
+            return {startup_lock}
         result: set[str] = set()
-        for channel in guild.text_channels:
+        for channel in self._location_channels(guild):
             if not self._channel_is_automatic_scope(
                 channel,
                 event_locations_enabled=event_locations_enabled,
@@ -804,54 +999,97 @@ class FaervellBot(commands.Bot):
                 result.add(str(channel.id))
         return result
 
+    @staticmethod
+    def _location_hierarchy(
+        channel: discord.TextChannel | discord.Thread,
+    ) -> tuple[str | None, str | None, str]:
+        category = None
+        parent_name = None
+        if isinstance(channel, discord.Thread):
+            parent = channel.parent
+            if parent is not None:
+                parent_name = parent.name
+                category = parent.category
+        else:
+            category = channel.category
+        parts = [
+            part
+            for part in (
+                category.name if category else None,
+                parent_name,
+                channel.name,
+            )
+            if part
+        ]
+        return (
+            str(category.id) if category else None,
+            category.name if category else None,
+            " / ".join(parts),
+        )
+
     async def sync_location_scenes(self, guild_id: int) -> dict[str, int]:
         guild = self.get_guild(guild_id)
         if guild is None:
             guild = await self.fetch_guild(guild_id)
         normal_categories = set(self.settings.traveler_rp_category_ids)
+        manual_categories = set(self.settings.traveler_manual_only_category_ids)
         event_category = self.settings.traveler_events_category_id
-        target_categories = set(normal_categories)
+        target_categories = normal_categories | manual_categories
         if event_category is not None:
             target_categories.add(event_category)
 
         registered = 0
         updated = 0
         skipped_permissions = 0
+        startup_id = (
+            str(self.settings.traveler_startup_lock_channel_id)
+            if self.settings.traveler_startup_lock_channel_id
+            else None
+        )
         async with SessionLocal() as session:
-            for channel in guild.text_channels:
-                if channel.category_id not in target_categories:
+            for channel in self._location_channels(guild):
+                category_id = self._channel_category_id(channel)
+                if category_id not in target_categories and str(channel.id) != startup_id:
                     continue
                 writable, _ = self._channel_postability(channel)
                 if not writable:
                     skipped_permissions += 1
-                    continue
+                category_str, category_name, location_path = self._location_hierarchy(channel)
+                automatic = bool(
+                    writable
+                    and (
+                        category_id in normal_categories
+                        or (event_category is not None and category_id == event_category)
+                    )
+                )
+                if category_id in manual_categories:
+                    automatic = False
                 scene = await session.get(SceneConfig, str(channel.id))
                 if scene is None:
                     scene = SceneConfig(
                         channel_id=str(channel.id),
                         guild_id=str(guild.id),
                         enabled=True,
-                        location_id=re.sub(
-                            r"[^a-zа-яё0-9]+",
-                            "_",
-                            channel.name.casefold(),
-                        ).strip("_"),
-                        location_name=channel.name,
-                        profession_mask_id="traveler",
                     )
                     session.add(scene)
                     registered += 1
                 else:
-                    scene.enabled = True
-                    if not scene.location_name:
-                        scene.location_name = channel.name
-                    if not scene.location_id:
-                        scene.location_id = re.sub(
-                            r"[^a-zа-яё0-9]+",
-                            "_",
-                            channel.name.casefold(),
-                        ).strip("_")
                     updated += 1
+                scene.enabled = True
+                scene.location_id = re.sub(
+                    r"[^a-zа-яё0-9]+", "_", location_path.casefold()
+                ).strip("_")
+                scene.location_name = channel.name
+                scene.category_id = category_str
+                scene.category_name = category_name
+                scene.location_path = location_path
+                scene.automatic_appearance_allowed = automatic
+                if automatic and scene.appearance_probability <= 0:
+                    scene.appearance_probability = (
+                        self.settings.traveler_default_appearance_probability
+                    )
+                elif not automatic:
+                    scene.appearance_probability = 0.0
             await session.commit()
         return {
             "registered": registered,
@@ -862,10 +1100,7 @@ class FaervellBot(commands.Bot):
     async def on_ready(self) -> None:
         print(f"Faervell Stranger logged in as {self.user} ({self.user.id if self.user else '?'})")
         if self.settings.discord_guild_id is not None:
-            if (
-                self.settings.traveler_auto_register_locations
-                and not self._locations_bootstrap_done
-            ):
+            if self.settings.traveler_auto_register_locations and not self._locations_bootstrap_done:
                 self._locations_bootstrap_done = True
                 try:
                     report = await self.sync_location_scenes(self.settings.discord_guild_id)
@@ -873,29 +1108,77 @@ class FaervellBot(commands.Bot):
                         "RP location sync: "
                         f"registered={report['registered']} "
                         f"updated={report['updated']} "
-                        f"skipped_permissions={report['skipped_permissions']}"
+                        f"unwritable={report['skipped_permissions']}"
                     )
                 except Exception as exc:
                     print(f"RP location sync failed: {type(exc).__name__}: {exc}")
 
+            # Test safety is not a soft preference: every process start resets the
+            # traveller to the configured test channel and clears all queued travel.
             async with SessionLocal() as session:
-                presence = await self.runtime.presence.ensure_presence(
-                    session,
-                    guild_id=str(self.settings.discord_guild_id),
-                )
+                startup_id = self.settings.traveler_startup_lock_channel_id
+                if self.settings.traveler_enforce_startup_lock and startup_id is not None:
+                    startup_channel = self.get_channel(startup_id)
+                    if startup_channel is None:
+                        try:
+                            startup_channel = await self.fetch_channel(startup_id)
+                        except discord.HTTPException as exc:
+                            raise RuntimeError(
+                                f"Не удалось получить тестовый канал {startup_id}: {exc}"
+                            ) from exc
+                    if not isinstance(startup_channel, (discord.TextChannel, discord.Thread)):
+                        raise RuntimeError("Тестовый канал блокировки не является текстовой локацией")
+                    category_id, category_name, location_path = self._location_hierarchy(startup_channel)
+                    scene = await session.get(SceneConfig, str(startup_id))
+                    if scene is None:
+                        scene = SceneConfig(
+                            channel_id=str(startup_id),
+                            guild_id=str(self.settings.discord_guild_id),
+                        )
+                        session.add(scene)
+                    scene.enabled = True
+                    scene.location_name = startup_channel.name
+                    scene.location_id = re.sub(
+                        r"[^a-zа-яё0-9]+", "_", location_path.casefold()
+                    ).strip("_")
+                    scene.category_id = category_id
+                    scene.category_name = category_name
+                    scene.location_path = location_path
+                    scene.automatic_appearance_allowed = False
+                    scene.appearance_probability = 0.0
+                    await session.flush()
+                    presence = await self.runtime.presence.enforce_startup_lock(
+                        session,
+                        guild_id=str(self.settings.discord_guild_id),
+                        scene=scene,
+                    )
+                else:
+                    presence = await self.runtime.presence.ensure_presence(
+                        session,
+                        guild_id=str(self.settings.discord_guild_id),
+                    )
                 await session.commit()
             print(
                 "Traveler presence: "
                 f"current={presence.current_location_name or 'none'} "
+                f"channel={presence.current_channel_id or 'none'} "
                 f"next={presence.next_location_name or 'none'} "
-                f"locked={presence.movement_locked}"
+                f"locked={presence.movement_locked} "
+                f"locked_channel={presence.locked_channel_id or 'none'}"
             )
+
+        if not self._views_restored:
+            self._views_restored = True
+            await self._restore_persistent_views()
 
         if self._presence_task is None or self._presence_task.done():
             self._presence_task = asyncio.create_task(
-                self._presence_loop(),
-                name="traveler-presence-loop",
+                self._presence_loop(), name="traveler-presence-loop"
             )
+
+        if not self._knowledge_bootstrap_done and self.settings.knowledge_auto_ingest:
+            self._knowledge_bootstrap_done = True
+            asyncio.create_task(self._bootstrap_knowledge(), name="knowledge-bootstrap")
 
         if (
             not self._registry_bootstrap_done
@@ -905,6 +1188,337 @@ class FaervellBot(commands.Bot):
             asyncio.create_task(
                 self._bootstrap_character_registry(), name="character-registry-bootstrap"
             )
+
+    async def _bootstrap_knowledge(self) -> None:
+        try:
+            async with SessionLocal() as session:
+                info = await self.runtime.knowledge.diagnostics(session)
+            if info.healthy:
+                print(
+                    "Knowledge bootstrap skipped: "
+                    f"wiki_documents={info.wiki_documents} chunks={info.chunks}"
+                )
+                return
+            print(f"Knowledge bootstrap started: {info.reason}")
+            ingestor = SourceIngestor()
+            try:
+                async with SessionLocal() as session:
+                    report = await ingestor.ingest_manifest(session, Path("data/sources.yaml"))
+                print(
+                    "Knowledge bootstrap finished: "
+                    f"documents={report['documents']} chunks={report['chunks']} "
+                    f"errors={len(report['errors'])}"
+                )
+            finally:
+                await ingestor.close()
+        except Exception as exc:
+            print(f"Knowledge bootstrap failed: {type(exc).__name__}: {exc}")
+
+    async def _restore_persistent_views(self) -> None:
+        async with SessionLocal() as session:
+            bundles = list(
+                (
+                    await session.execute(
+                        select(ResponseBundle)
+                        .where(
+                            ResponseBundle.active.is_(True),
+                            ResponseBundle.last_message_id.is_not(None),
+                        )
+                        .order_by(ResponseBundle.updated_at.desc())
+                        .limit(500)
+                    )
+                ).scalars()
+            )
+            reviews = list(
+                (
+                    await session.execute(
+                        select(GMReviewRequest)
+                        .where(
+                            GMReviewRequest.status == "PENDING",
+                            GMReviewRequest.gm_message_id.is_not(None),
+                        )
+                        .order_by(GMReviewRequest.created_at.desc())
+                        .limit(200)
+                    )
+                ).scalars()
+            )
+        for bundle in bundles:
+            if bundle.last_message_id:
+                self.add_view(
+                    ResponseFeedbackView(
+                        self,
+                        bundle.id,
+                        regeneration_enabled=bundle.response_kind != "ARRIVAL",
+                    ),
+                    message_id=int(bundle.last_message_id),
+                )
+        for review in reviews:
+            if review.gm_message_id:
+                self.add_view(GMReviewView(self, review.id), message_id=int(review.gm_message_id))
+        print(f"Persistent views restored: responses={len(bundles)} gm_reviews={len(reviews)}")
+
+    async def record_response_feedback(
+        self,
+        interaction: discord.Interaction,
+        bundle_id: str,
+        rating: int,
+    ) -> None:
+        async with SessionLocal() as session:
+            bundle = await session.get(ResponseBundle, bundle_id)
+            if bundle is None or not bundle.active:
+                await interaction.response.send_message("Этот ответ уже недоступен для оценки.", ephemeral=True)
+                return
+            existing = (
+                await session.execute(
+                    select(ResponseFeedback).where(
+                        ResponseFeedback.bundle_id == bundle_id,
+                        ResponseFeedback.discord_user_id == str(interaction.user.id),
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(
+                    ResponseFeedback(
+                        bundle_id=bundle_id,
+                        discord_user_id=str(interaction.user.id),
+                        rating=1 if rating > 0 else -1,
+                    )
+                )
+            else:
+                existing.rating = 1 if rating > 0 else -1
+            await session.commit()
+        await interaction.response.send_message(
+            "Оценка сохранена: " + ("нравится" if rating > 0 else "не нравится") + ".",
+            ephemeral=True,
+        )
+
+    async def regenerate_response(
+        self,
+        interaction: discord.Interaction,
+        bundle_id: str,
+    ) -> None:
+        if not self._member_is_gm(interaction.user):
+            await interaction.response.send_message(
+                "Перегенерация доступна только администраторам и назначенным ГМ.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with SessionLocal() as session:
+            bundle = await session.get(ResponseBundle, bundle_id)
+            if bundle is None or not bundle.active:
+                await interaction.followup.send("Ответ не найден или уже закрыт.", ephemeral=True)
+                return
+            if bundle.response_kind == "ARRIVAL":
+                await interaction.followup.send("Шаблон появления не перегенерируется.", ephemeral=True)
+                return
+            if bundle.regeneration_count >= bundle.regeneration_limit:
+                await interaction.followup.send("Лимит перегенераций исчерпан.", ephemeral=True)
+                return
+            packet = ActorPacket.model_validate(bundle.actor_packet_json)
+            context = SceneContext.model_validate(bundle.scene_context_json)
+            response, model, reason = await self.runtime.orchestrator.regenerate(
+                session,
+                packet=packet,
+                context=context,
+                excluded_models=set(bundle.model_history or []),
+            )
+            final_text = self._with_sources(response, list(bundle.citations_json or []))
+            scene = await session.get(SceneConfig, bundle.channel_id)
+            hint_enabled = bool(scene and scene.reply_hint_enabled)
+            model_name = model or "local/template"
+            parts = self._response_parts(final_text, enabled=hint_enabled, model=model_name)
+            channel_id = int(bundle.channel_id)
+            message_ids = list(bundle.message_ids or [])
+            await session.commit()
+
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.followup.send("Канал ответа недоступен.", ephemeral=True)
+            return
+
+        old_messages: list[discord.Message] = []
+        for message_id in message_ids:
+            try:
+                old_messages.append(await channel.fetch_message(int(message_id)))
+            except discord.HTTPException:
+                continue
+        new_messages: list[discord.Message] = []
+        view = ResponseFeedbackView(self, bundle_id, regeneration_enabled=True)
+        for index, part in enumerate(parts):
+            is_last = index == len(parts) - 1
+            if index < len(old_messages):
+                message = old_messages[index]
+                await message.edit(content=part, view=view if is_last else None)
+            else:
+                if is_last:
+                    message = await channel.send(part, view=view)
+                else:
+                    message = await channel.send(part)
+            new_messages.append(message)
+        for extra in old_messages[len(parts):]:
+            try:
+                await extra.delete()
+            except discord.HTTPException:
+                pass
+
+        async with SessionLocal() as session:
+            bundle = await session.get(ResponseBundle, bundle_id)
+            if bundle is not None:
+                bundle.message_ids = [str(item.id) for item in new_messages]
+                bundle.last_message_id = str(new_messages[-1].id)
+                bundle.content = final_text
+                bundle.model = model_name
+                bundle.model_history = [*(bundle.model_history or []), model_name]
+                bundle.regeneration_count += 1
+                await session.commit()
+        await interaction.followup.send(
+            f"Ответ перегенерирован моделью **{model_name}**. Причина выбора: `{reason or '—'}`.",
+            ephemeral=True,
+        )
+
+    async def decide_gm_review(
+        self,
+        interaction: discord.Interaction,
+        review_id: str,
+        *,
+        approved: bool,
+    ) -> None:
+        if not self._member_is_gm(interaction.user):
+            await interaction.response.send_message("Решение доступно только ГМ.", ephemeral=True)
+            return
+        async with SessionLocal() as session:
+            review = await session.get(GMReviewRequest, review_id)
+            if review is None or review.status != "PENDING":
+                await interaction.response.send_message("Заявка уже обработана.", ephemeral=True)
+                return
+            review.status = "APPROVED" if approved else "REJECTED"
+            review.decided_by_discord_user_id = str(interaction.user.id)
+            review.decided_at = datetime.now(UTC)
+            if review.related_quest_id:
+                quest = await session.get(Quest, review.related_quest_id)
+                if quest is not None:
+                    quest.status = "ACTIVE" if approved else "REJECTED"
+            source_channel_id = review.channel_id
+            await session.commit()
+        await interaction.response.edit_message(
+            content=(interaction.message.content if interaction.message else "")
+            + f"\n\n**Решение:** {'одобрено' if approved else 'отклонено'} <@{interaction.user.id}>",
+            view=None,
+        )
+        try:
+            channel = self.get_channel(int(source_channel_id)) or await self.fetch_channel(
+                int(source_channel_id)
+            )
+            if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await channel.send(
+                    f"Заявка Странника `{review_id}` {'одобрена' if approved else 'отклонена'} ГМ."
+                )
+        except discord.HTTPException:
+            pass
+
+    async def _post_gm_review(self, review_id: str) -> None:
+        async with SessionLocal() as session:
+            review = await session.get(GMReviewRequest, review_id)
+            if review is None or review.status != "PENDING" or review.gm_message_id:
+                return
+            runtime = await session.get(GuildRuntimeSettings, review.guild_id)
+            configured = (
+                runtime.gm_review_channel_id if runtime and runtime.gm_review_channel_id else None
+            ) or (
+                str(self.settings.discord_gm_review_channel_id)
+                if self.settings.discord_gm_review_channel_id
+                else None
+            ) or (
+                str(self.settings.discord_admin_channel_id)
+                if self.settings.discord_admin_channel_id
+                else None
+            )
+            if not configured:
+                print(f"GM review pending without channel: id={review.id} reason={review.reason}")
+                return
+            payload = dict(review.payload or {})
+            content = (
+                f"**Новая заявка Странника: {review.request_type}**\n"
+                f"ID: `{review.id}`\n"
+                f"Причина: {review.reason}\n"
+                f"Игрок: {f'<@{review.player_discord_user_id}>' if review.player_discord_user_id else 'не определён'}\n"
+                f"Исходный канал: <#{review.channel_id}>\n"
+                f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)[:1200]}\n```"
+            )
+        channel = self.get_channel(int(configured)) or await self.fetch_channel(int(configured))
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            print(f"Configured GM review channel is not text: {configured}")
+            return
+        sent = await channel.send(content, view=GMReviewView(self, review_id))
+        async with SessionLocal() as session:
+            review = await session.get(GMReviewRequest, review_id)
+            if review is not None:
+                review.gm_message_id = str(sent.id)
+                await session.commit()
+
+    async def _send_process_result(
+        self,
+        source_message: discord.Message,
+        scene: SceneConfig,
+        result: ProcessResult,
+    ) -> None:
+        final_text = self._with_sources(result.response, result.citations)
+        model_name = result.used_actor_model or "local/template"
+        guild_id = str(source_message.guild.id) if source_message.guild else "unknown"
+        async with SessionLocal() as session:
+            runtime = await session.get(GuildRuntimeSettings, guild_id)
+            regen_limit = (
+                runtime.regeneration_limit if runtime else self.settings.discord_regeneration_limit
+            )
+            bundle = ResponseBundle(
+                guild_id=guild_id,
+                channel_id=str(source_message.channel.id),
+                scene_id=scene.scene_id,
+                source_message_id=str(source_message.id),
+                response_kind=result.actor_packet.response_type.value,
+                model=model_name,
+                model_history=[model_name],
+                content=final_text,
+                actor_packet_json=result.actor_packet.model_dump(mode="json"),
+                scene_context_json=(
+                    result.scene_context.model_dump(mode="json") if result.scene_context else {}
+                ),
+                citations_json=result.citations,
+                regeneration_limit=regen_limit,
+            )
+            session.add(bundle)
+            await session.flush()
+            bundle_id = bundle.id
+            await session.commit()
+
+        parts = self._response_parts(final_text, enabled=scene.reply_hint_enabled, model=model_name)
+        view = ResponseFeedbackView(self, bundle_id, regeneration_enabled=True)
+        sent_messages: list[discord.Message] = []
+        for index, part in enumerate(parts):
+            if index == len(parts) - 1:
+                sent = await source_message.reply(part, mention_author=False, view=view)
+            else:
+                sent = await source_message.reply(part, mention_author=False)
+            sent_messages.append(sent)
+            async with SessionLocal() as session:
+                await self.runtime.orchestrator.record_outgoing(
+                    session,
+                    message_id=str(sent.id),
+                    guild_id=guild_id,
+                    channel_id=str(source_message.channel.id),
+                    content=part,
+                    created_at=sent.created_at,
+                )
+        async with SessionLocal() as session:
+            stored_bundle = await session.get(ResponseBundle, bundle_id)
+            if stored_bundle is not None:
+                stored_bundle.message_ids = [str(item.id) for item in sent_messages]
+                stored_bundle.last_message_id = str(sent_messages[-1].id)
+                await session.commit()
+        if result.gm_review_request_id:
+            await self._post_gm_review(result.gm_review_request_id)
 
     async def close(self) -> None:
         if self._presence_task is not None:
@@ -1028,18 +1642,7 @@ class FaervellBot(commands.Bot):
                 async with SessionLocal() as session:
                     result = await self.runtime.orchestrator.process(session, incoming)
 
-            final_text = self._with_sources(result.response, result.citations)
-            for part in self._reply_parts(final_text, enabled=scene.reply_hint_enabled):
-                sent = await message.reply(part, mention_author=False)
-                async with SessionLocal() as session:
-                    await self.runtime.orchestrator.record_outgoing(
-                        session,
-                        message_id=str(sent.id),
-                        guild_id=str(message.guild.id),
-                        channel_id=channel_id,
-                        content=part,
-                        created_at=sent.created_at,
-                    )
+            await self._send_process_result(message, scene, result)
 
     async def _presence_loop(self) -> None:
         await self.wait_until_ready()
@@ -1112,17 +1715,44 @@ class FaervellBot(commands.Bot):
         text = self._arrival_text(
             profession_mask_id=transition.profession_mask_id,
             location_name=transition.location_name,
+            scene_id=transition.scene_id,
         )
-        for part in self._reply_parts(
+        model_name = "local/arrival-template"
+        parts = self._response_parts(
             text,
             enabled=transition.reply_hint_enabled,
-        ):
+            model=model_name,
+        )
+        async with SessionLocal() as session:
+            bundle = ResponseBundle(
+                guild_id=str(self.settings.discord_guild_id),
+                channel_id=str(channel_id),
+                scene_id=transition.scene_id,
+                response_kind="ARRIVAL",
+                model=model_name,
+                model_history=[model_name],
+                content=text,
+                actor_packet_json={},
+                scene_context_json={},
+                regeneration_limit=0,
+            )
+            session.add(bundle)
+            await session.flush()
+            bundle_id = bundle.id
+            await session.commit()
+        view = ResponseFeedbackView(self, bundle_id, regeneration_enabled=False)
+        messages: list[discord.Message] = []
+        for index, part in enumerate(parts):
             try:
-                sent = await channel.send(part)
+                if index == len(parts) - 1:
+                    sent = await channel.send(part, view=view)
+                else:
+                    sent = await channel.send(part)
             except discord.HTTPException as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 print(f"Arrival announcement failed: {error}")
                 return False, error
+            messages.append(sent)
             async with SessionLocal() as session:
                 await self.runtime.orchestrator.record_outgoing(
                     session,
@@ -1132,21 +1762,23 @@ class FaervellBot(commands.Bot):
                     content=part,
                     created_at=sent.created_at,
                 )
+        async with SessionLocal() as session:
+            stored_bundle = await session.get(ResponseBundle, bundle_id)
+            if stored_bundle is not None:
+                stored_bundle.message_ids = [str(item.id) for item in messages]
+                stored_bundle.last_message_id = str(messages[-1].id)
+                await session.commit()
         return True, None
 
     @staticmethod
-    def _arrival_text(*, profession_mask_id: str, location_name: str | None) -> str:
-        activity = {
-            "herbalist": "перебирая на ходу связку подсушенных трав",
-            "artisan": "проверяя пальцем натяжение ремня на дорожной сумке",
-            "merchant": "поправляя ремень тяжёлой сумы с товаром",
-            "guide": "сверяя дорогу по потёртой карте",
-            "traveler": "стряхивая с плаща дорожную пыль",
-        }.get(profession_mask_id, "стряхивая с плаща дорожную пыль")
+    def _arrival_text(
+        *, profession_mask_id: str, location_name: str | None, scene_id: str
+    ) -> str:
+        activity = arrival_activity(profession_mask_id, scene_id)
         place = f" в {location_name}" if location_name else ""
         return (
             f"*Через некоторое время Странник появляется{place}, {activity}. "
-            "Он не торопится вмешиваться в чужие разговоры, но остаётся поблизости.*"
+            "Он не вмешивается без приглашения, но остаётся неподалёку и осматривается.*"
         )
 
     async def _bootstrap_character_registry(self) -> None:
@@ -1306,6 +1938,22 @@ class FaervellBot(commands.Bot):
         if not unique:
             return text
         return text + "\n\n-# Источники: " + " • ".join(unique[:4])
+
+    def _response_parts(self, text: str, *, enabled: bool, model: str) -> list[str]:
+        parts = self._split_message(text)
+        suffixes: list[str] = []
+        if enabled and self.settings.discord_reply_hint_text.strip():
+            suffixes.append(f"||{self.settings.discord_reply_hint_text.strip()}||")
+        if self.settings.discord_model_footer_enabled:
+            suffixes.append(f"-# Модель: `{model}`")
+        if not suffixes:
+            return parts
+        suffix = "\n\n" + "\n".join(suffixes)
+        if len(parts[-1]) + len(suffix) <= 2000:
+            parts[-1] += suffix
+        else:
+            parts.append("\n".join(suffixes))
+        return parts
 
     def _reply_parts(self, text: str, *, enabled: bool) -> list[str]:
         hint = self.settings.discord_reply_hint_text.strip()

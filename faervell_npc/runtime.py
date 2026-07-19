@@ -28,6 +28,7 @@ class Runtime:
     locks: SceneLockManager
     characters: CharacterRegistryService
     presence: PresenceService
+    knowledge: KnowledgeService
     orchestrator: StrangerOrchestrator
 
     async def close(self) -> None:
@@ -69,5 +70,6 @@ def build_runtime() -> Runtime:
         locks=SceneLockManager(),
         characters=characters,
         presence=presence,
+        knowledge=knowledge,
         orchestrator=orchestrator,
     )

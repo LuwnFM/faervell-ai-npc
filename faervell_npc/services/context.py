@@ -10,12 +10,14 @@ from faervell_npc.services.characters import (
     CharacterResolution,
 )
 from faervell_npc.services.memory import MemoryService
+from faervell_npc.services.stagecraft import StagecraftService
 
 
 class SceneContextBuilder:
     def __init__(self, memory: MemoryService, characters: CharacterRegistryService) -> None:
         self.memory = memory
         self.characters = characters
+        self.stagecraft = StagecraftService()
 
     async def ensure_scene(
         self,
@@ -49,7 +51,9 @@ class SceneContextBuilder:
         character_id: str,
         character_name: str,
     ) -> SceneContext:
-        recent = await self.memory.recent_messages(session, scene.scene_id)
+        recent = await self.memory.recent_messages(
+            session, scene.scene_id, character_id=character_id
+        )
         memories = await self.memory.retrieve(
             session,
             character_id=character_id,
@@ -68,6 +72,9 @@ class SceneContextBuilder:
             scene_id=scene.scene_id,
             location_id=scene.location_id,
             location_name=scene.location_name,
+            category_id=scene.category_id,
+            category_name=scene.category_name,
+            location_path=scene.location_path or scene.location_name,
             profession_mask_id=scene.profession_mask_id,
             recognition_mode=relationship.recognition_mode,
             player_name=character_name,
@@ -93,17 +100,12 @@ class SceneContextBuilder:
             relationship_summary=relationship.summary,
             scene_state={
                 "mood": "спокойно-заинтересованный",
-                "current_goal": "наблюдать за собеседником и продолжать своё занятие",
-                "current_activity": self._activity_for_mask(scene.profession_mask_id),
+                "current_goal": "слушать собеседника, отвечать по делу и не принимать его заявления за доказанный факт",
+                "current_activity": self.stagecraft.choose_activity(
+                    scene.profession_mask_id,
+                    scene_id=scene.scene_id,
+                    recent_text=" ".join(msg.content for msg in recent[-8:]),
+                ),
+                "location_path": scene.location_path or scene.location_name,
             },
         )
-
-    @staticmethod
-    def _activity_for_mask(mask: str) -> str:
-        return {
-            "herbalist": "перебирает и связывает пучки трав",
-            "artisan": "чинит потёртый ремень дорожной сумки",
-            "merchant": "сверяет товар и мелкие гири",
-            "guide": "ведёт ногтем по старой карте",
-            "traveler": "очищает дорожную пряжку от пыли",
-        }.get(mask, "занят простой дорожной работой")

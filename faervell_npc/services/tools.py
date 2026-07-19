@@ -5,9 +5,18 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from faervell_npc.models import KnowledgeGap, Quest, QuestObjective, RelationshipState
+from faervell_npc.models import (
+    ConversationMessage,
+    GMReviewRequest,
+    KnowledgeGap,
+    Quest,
+    QuestObjective,
+    RelationshipState,
+    SceneConfig,
+)
 from faervell_npc.schemas import Corpus, QuestDraft, ToolRequest
 from faervell_npc.services.disclosure import DisclosureContext, LoreDisclosureEngine
 from faervell_npc.services.knowledge import KnowledgeService
@@ -79,7 +88,7 @@ class ToolExecutor:
 
         if request.name == "search_lore":
             query = self._required_str(args, "query")
-            hits = await self.knowledge.search(session, query, corpus=Corpus.LORE)
+            hits = await self.knowledge.search_world(session, query)
             relationship = await session.get(RelationshipState, character_id)
             trust = relationship.trust if relationship else 0.0
             reciprocity = relationship.reciprocity_balance if relationship else 0
@@ -100,6 +109,7 @@ class ToolExecutor:
                         "title": hit.title,
                         "corpus": hit.corpus.value,
                         "free_summary": decision.free_summary,
+                        "content": hit.content if decision.may_disclose else decision.free_summary,
                         "may_disclose": decision.may_disclose,
                         "required_exchange": decision.required_exchange.model_dump(mode="json"),
                         "reason": decision.reason,
@@ -192,6 +202,17 @@ class ToolExecutor:
                         )
                     )
                 response.update({"committed": True, "quest_id": record.id, "status": status})
+                if status == "PENDING_GM":
+                    review = await self._create_review_request(
+                        session,
+                        scene_id=scene_id,
+                        character_id=character_id,
+                        request_type="QUEST",
+                        reason="quest_requires_gm_approval",
+                        payload={"quest": quest.model_dump(mode="json"), "validation": response["validation"]},
+                        related_quest_id=record.id,
+                    )
+                    response["gm_review_request_id"] = review.id
             return response
 
         if request.name == "create_admin_question":
@@ -205,9 +226,77 @@ class ToolExecutor:
             )
             session.add(gap)
             await session.flush()
-            return {"knowledge_gap_id": gap.id, "status": gap.status}
+            review = await self._create_review_request(
+                session,
+                scene_id=scene_id,
+                character_id=character_id,
+                request_type="KNOWLEDGE_GAP",
+                reason="knowledge_confirmation_required",
+                payload={"knowledge_gap_id": gap.id, "question": question, "evidence": gap.evidence},
+            )
+            return {
+                "knowledge_gap_id": gap.id,
+                "status": gap.status,
+                "gm_review_request_id": review.id,
+            }
+
+        if request.name == "create_gm_review":
+            reason = self._required_str(args, "reason")
+            request_type = str(args.get("request_type") or "GENERAL")[:32]
+            review = await self._create_review_request(
+                session,
+                scene_id=scene_id,
+                character_id=character_id,
+                request_type=request_type,
+                reason=reason,
+                payload=dict(args.get("payload") or {}),
+            )
+            return {"gm_review_request_id": review.id, "status": review.status}
 
         raise ValueError(f"Unknown tool: {request.name}")
+
+    async def _create_review_request(
+        self,
+        session: AsyncSession,
+        *,
+        scene_id: str,
+        character_id: str,
+        request_type: str,
+        reason: str,
+        payload: dict[str, Any],
+        related_quest_id: str | None = None,
+    ) -> GMReviewRequest:
+        scene = (
+            await session.execute(
+                select(SceneConfig).where(SceneConfig.scene_id == scene_id).limit(1)
+            )
+        ).scalar_one_or_none()
+        player = (
+            await session.execute(
+                select(ConversationMessage.discord_user_id)
+                .where(
+                    ConversationMessage.scene_id == scene_id,
+                    ConversationMessage.character_id == character_id,
+                    ConversationMessage.discord_user_id.is_not(None),
+                )
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        review = GMReviewRequest(
+            guild_id=scene.guild_id if scene else "unknown",
+            scene_id=scene_id,
+            channel_id=scene.channel_id if scene else "unknown",
+            player_discord_user_id=player,
+            character_id=character_id,
+            request_type=request_type[:32],
+            reason=reason,
+            payload=payload,
+            related_quest_id=related_quest_id,
+        )
+        session.add(review)
+        await session.flush()
+        return review
 
     @staticmethod
     def _validate_evidence(

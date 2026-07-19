@@ -14,19 +14,22 @@ test -f .env || {
 }
 
 chmod 600 .env
-git pull --ff-only
-if [[ -x scripts/migrate-v0.6-model-policy.sh ]]; then
-  scripts/migrate-v0.6-model-policy.sh "$APP_DIR/.env"
+if [[ -f scripts/migrate-v0.7.sh ]]; then
+  bash scripts/migrate-v0.7.sh "$APP_DIR/.env"
 fi
+
 docker compose config >/dev/null
 docker compose up -d --build
 
-for _ in $(seq 1 30); do
-  if curl -fsS http://127.0.0.1:8080/health >/dev/null 2>&1; then
+for _ in $(seq 1 45); do
+  if curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
+
+echo "=== VERSION ==="
+git log -1 --oneline || true
 
 echo "=== CONTAINERS ==="
 docker compose ps
@@ -38,4 +41,4 @@ echo "=== READY ==="
 curl -fsS http://127.0.0.1:8080/ready && echo
 
 echo "=== APP LOGS ==="
-docker compose logs --tail=120 --no-color app
+docker compose logs --tail=180 --no-color app

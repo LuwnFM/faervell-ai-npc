@@ -123,16 +123,17 @@ class StrangerOrchestrator:
         else:
             packet = self._chat_packet(context)
 
-        response, actor_model = await self.actor.render(session, packet, context)
+        response, actor_model, selection_reason = await self.actor.render(session, packet, context)
         guard_result = self.guard.validate(response, packet)
         if not guard_result.passed:
-            response, actor_model_retry = await self.actor.render(
+            response, actor_model_retry, retry_reason = await self.actor.render(
                 session,
                 packet,
                 context,
                 correction="; ".join(guard_result.violations),
             )
             actor_model = actor_model_retry or actor_model
+            selection_reason = retry_reason or selection_reason
             guard_result = self.guard.validate(response, packet)
             if not guard_result.passed:
                 response = self.actor.fallback(packet, context)
@@ -151,6 +152,8 @@ class StrangerOrchestrator:
                     "route": route.model_dump(mode="json"),
                     "actor_model": actor_model,
                     "planner_model": planner_model,
+                    "model_selection_reason": selection_reason,
+                    "scene_context": context.model_dump(mode="json"),
                     "guard_passed": guard_result.passed,
                     "guard_violations": guard_result.violations,
                     "actor_packet": packet.model_dump(mode="json"),
@@ -170,6 +173,9 @@ class StrangerOrchestrator:
             planner_escalated=route.route == Route.PLANNER,
             guard_passed=guard_result.passed,
             citations=citations,
+            scene_context=context,
+            model_selection_reason=selection_reason,
+            gm_review_request_id=self._gm_review_id(packet),
         )
 
 
@@ -239,6 +245,17 @@ class StrangerOrchestrator:
             planner_escalated=False,
             guard_passed=True,
             citations=[],
+            scene_context=SceneContext(
+                scene_id=scene.scene_id,
+                location_id=scene.location_id,
+                location_name=scene.location_name,
+                category_id=scene.category_id,
+                category_name=scene.category_name,
+                location_path=scene.location_path or scene.location_name,
+                profession_mask_id=scene.profession_mask_id,
+                player_name=character_name,
+                character_id=character_id,
+            ),
         )
 
 
@@ -269,6 +286,11 @@ class StrangerOrchestrator:
                 planner_escalated=(details.get("route") or {}).get("route") == Route.PLANNER.value,
                 guard_passed=bool(details.get("guard_passed", True)),
                 citations=list(details.get("citations") or []),
+                scene_context=details.get("scene_context"),
+                model_selection_reason=details.get("model_selection_reason"),
+                gm_review_request_id=self._gm_review_id(
+                    ActorPacket.model_validate(details["actor_packet"])
+                ),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -356,8 +378,8 @@ class StrangerOrchestrator:
         query: str,
         context: SceneContext,
     ) -> tuple[ActorPacket, list[dict[str, str | None]]]:
-        hits = await self.knowledge.search(session, query, corpus=Corpus.MECHANICS)
-        useful = [hit for hit in hits if hit.score >= 0.18][:4]
+        hits = await self.knowledge.search_world(session, query)
+        useful = [hit for hit in hits if hit.corpus == Corpus.MECHANICS and hit.score >= 0.08][:5]
         if not useful:
             await self._create_gap(session, query, context)
             return self.planner.safe_packet(context, "Точного правила в загруженных источниках не найдено."), []
@@ -388,8 +410,8 @@ class StrangerOrchestrator:
         query: str,
         context: SceneContext,
     ) -> tuple[ActorPacket, list[dict[str, str | None]]]:
-        hits = await self.knowledge.search(session, query, corpus=Corpus.LORE)
-        useful = [hit for hit in hits if hit.score >= 0.16][:4]
+        hits = await self.knowledge.search_world(session, query)
+        useful = [hit for hit in hits if hit.score >= 0.08][:5]
         if not useful:
             await self._create_gap(session, query, context)
             return self.planner.safe_packet(context, "В разрешённых знаниях Странника нет надёжного ответа."), []
@@ -412,7 +434,9 @@ class StrangerOrchestrator:
         forbidden_labels: list[str] = []
         offer: DisclosureExchange | None = None
         for hit, decision in zip(useful, decisions, strict=True):
-            if decision.free_summary:
+            if decision.may_disclose:
+                allowed.append(self._source_fact(hit.content, hit.title))
+            elif decision.free_summary:
                 allowed.append(self._source_fact(decision.free_summary, hit.title))
             forbidden_labels.extend(f"withheld:{hit.id}" for _ in decision.withheld_details)
             if decision.required_exchange.type != "NONE" and offer is None:
@@ -421,7 +445,10 @@ class StrangerOrchestrator:
         citations = [
             {"source_id": hit.source_id, "title": hit.title, "url": hit.url, "revision": hit.revision}
             for hit in useful
-            if any(dec.knowledge_id == hit.id and dec.free_summary for dec in decisions)
+            if any(
+                dec.knowledge_id == hit.id and (dec.may_disclose or dec.free_summary)
+                for dec in decisions
+            )
         ]
         return (
             ActorPacket(
@@ -438,6 +465,35 @@ class StrangerOrchestrator:
             ),
             citations,
         )
+
+    async def regenerate(
+        self,
+        session: AsyncSession,
+        *,
+        packet: ActorPacket,
+        context: SceneContext,
+        excluded_models: set[str],
+    ) -> tuple[str, str | None, str | None]:
+        """Regenerate the literary surface only; facts and state remain unchanged."""
+        response, model, reason = await self.actor.render(
+            session,
+            packet,
+            context,
+            correction="Сделай новый вариант заметно иначе, без повторения прежних действий и формулировок.",
+            free_only=True,
+            exclude_models=excluded_models,
+        )
+        guard = self.guard.validate(response, packet)
+        if not guard.passed:
+            response = self.actor.fallback(packet, context)
+            model = None
+            reason = "local_template_regeneration_guard_failed"
+        return response, model, reason
+
+    @staticmethod
+    def _gm_review_id(packet: ActorPacket) -> str | None:
+        value = packet.action_result.get("gm_review_request_id")
+        return str(value) if value else None
 
     async def _create_gap(self, session: AsyncSession, question: str, context: SceneContext) -> None:
         session.add(

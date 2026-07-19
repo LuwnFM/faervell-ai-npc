@@ -89,6 +89,10 @@ class SceneConfig(Base):
     location_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     profession_mask_id: Mapped[str] = mapped_column(String(64), default="traveler")
+    category_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    category_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    location_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    automatic_appearance_allowed: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     response_mode: Mapped[str] = mapped_column(String(32), default="MENTION_OR_REPLY")
     reply_hint_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     appearance_probability: Mapped[float] = mapped_column(
@@ -359,6 +363,10 @@ class ModelCall(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    response_metadata: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
@@ -375,3 +383,93 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     __table_args__ = (UniqueConstraint("action", "message_id", name="uq_audit_action_message"),)
+
+
+class GuildRuntimeSettings(Base):
+    __tablename__ = "guild_runtime_settings"
+
+    guild_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    gm_review_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    regeneration_limit: Mapped[int] = mapped_column(Integer, default=1)
+    model_footer_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    startup_lock_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    enforce_startup_lock: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class GMReviewRequest(Base):
+    __tablename__ = "gm_review_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    scene_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    player_discord_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    character_id: Mapped[str] = mapped_column(String(128), index=True)
+    request_type: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    related_quest_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    gm_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decided_by_discord_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResponseBundle(Base):
+    __tablename__ = "response_bundles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    scene_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    message_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    last_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    response_kind: Mapped[str] = mapped_column(String(32), default="DIALOGUE")
+    model: Mapped[str] = mapped_column(String(160), default="local/template")
+    model_history: Mapped[list[str]] = mapped_column(JSON, default=list)
+    content: Mapped[str] = mapped_column(Text, default="")
+    actor_packet_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    scene_context_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    citations_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    regeneration_count: Mapped[int] = mapped_column(Integer, default=0)
+    regeneration_limit: Mapped[int] = mapped_column(Integer, default=1)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ResponseFeedback(Base):
+    __tablename__ = "response_feedback"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    bundle_id: Mapped[str] = mapped_column(ForeignKey("response_bundles.id", ondelete="CASCADE"), index=True)
+    discord_user_id: Mapped[str] = mapped_column(String(32), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    __table_args__ = (UniqueConstraint("bundle_id", "discord_user_id"),)
+
+
+class KnowledgeImportRun(Base):
+    __tablename__ = "knowledge_import_runs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    source_id: Mapped[str] = mapped_column(String(160), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    documents: Mapped[int] = mapped_column(Integer, default=0)
+    chunks: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

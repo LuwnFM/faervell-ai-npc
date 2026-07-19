@@ -1,83 +1,74 @@
-# Развёртывание на VPS
+# Развёртывание и обновление на VPS
 
-## 1. Подготовка
-
-Нужны Docker Engine, Docker Compose plugin, домен только при внешнем доступе к operational API. Сам Discord-бот принимает события через исходящее Gateway-соединение, поэтому открывать порт 8080 в интернет необязательно.
+## Первичный запуск
 
 ```bash
-git clone https://github.com/YOUR_ORG/faervell-ai-npc.git
-cd faervell-ai-npc
+git clone https://github.com/LuwnFM/faervell-ai-npc.git /opt/faervell-npc/app
+cd /opt/faervell-npc/app
 cp .env.example .env
-nano .env
+chmod 600 .env
+# Заполните секреты, не публикуя их в терминале или Git.
+bash scripts/deploy-production.sh
 ```
 
-Обязательно измените `POSTGRES_PASSWORD`, пароль в `DATABASE_URL`, `PSEUDONYM_SECRET`, `DISCORD_TOKEN`. Ключ OpenRouter можно оставить пустым для локального режима. Для реестра персонажей укажите `DISCORD_CHARACTER_REGISTRY_CHANNEL_ID`. Параметры перемещения `TRAVELER_*` имеют безопасные значения по умолчанию и могут отсутствовать в старом production `.env`.
-
-## 2. Запуск
+Проверка:
 
 ```bash
-docker compose up -d --build
+curl -fsS http://127.0.0.1:8080/health && echo
+curl -fsS http://127.0.0.1:8080/ready && echo
 docker compose ps
-docker compose logs -f app
+docker compose logs --tail=200 --no-color app
 ```
 
-Инициализация схемы выполняется автоматически. Затем загрузите знания:
+## Обновление до v0.7
 
 ```bash
-docker compose exec app faervell-npc ingest data/sources.yaml
+cd /opt/faervell-npc/app
+./scripts/backup.sh
+git status --short
+git pull --ff-only
+bash scripts/deploy-production.sh
 ```
 
-## 3. Проверка
+`deploy-production.sh` вызывает `scripts/migrate-v0.7.sh`. Миграция обновляет только несекретные параметры модельной политики, RP-категорий, индексации и startup-lock; токены, API-ключи, пароли и `PSEUDONYM_SECRET` сохраняются.
 
-```bash
-curl http://127.0.0.1:8080/health
-curl http://127.0.0.1:8080/ready
-```
+Не запускайте `docker compose down -v`: флаг `-v` удаляет volumes базы и Redis.
 
-В Discord зарегистрируйте каналы-локации и проверьте присутствие:
+## Discord после обновления
 
 ```text
-/stranger scene_enable location:Рынок Харгатрена mask:herbalist
-/stranger appearance_chance percent:20
-/stranger reply_hint enabled:true
-/stranger cross_location_summons enabled:true
+/stranger gm_channel
+/stranger locations_sync
+/stranger source_ingest
+/stranger knowledge_status
+/stranger startup_lock_status
 /stranger status
 ```
 
-Странник отвечает только в текущей локации. Осмысленный пинг из другой включённой сцены ставит её следующей целью. Для немедленного теста используйте `/stranger move_here`.
+GM-канал назначается выполнением `/stranger gm_channel` непосредственно в нужном канале. Заявки на квесты и подтверждение знаний появляются там с кнопками решения.
 
-## 4. Обновление
+## Проверка OpenRouter
+
+После нового сообщения игрока:
 
 ```bash
-./scripts/backup.sh
-git pull --ff-only
-docker compose up -d --build
-docker compose logs --tail=200 app
+docker compose logs --tail=250 --no-color app | \
+  grep -E "model_call|OpenRouter|ERROR|WARNING" || true
 ```
 
-Изменения ORM после первого запуска должны сопровождаться миграцией. Не удаляйте volume PostgreSQL для обычного обновления.
+Полные результаты также находятся в таблице `model_calls`: модель, HTTP-код, токены, стоимость, latency, причина выбора, безопасные метаданные запроса и тело ошибки.
 
-## 5. Backup и restore
+## Проверка Fandom/RAG
+
+```bash
+docker compose exec -T app faervell-npc ingest data/sources.yaml
+```
+
+Полный crawl считается успешным только при импорте не менее 500 страниц. При неполном ответе Fandom старая рабочая индексация сохраняется.
+
+## Backup и restore
 
 ```bash
 ./scripts/backup.sh
 ./scripts/restore.sh backups/faervell-YYYYMMDD-HHMMSS.dump
 ```
-
-Restore перезаписывает содержимое выбранной базы. Перед ним остановите `app` и создайте дополнительную копию.
-
-## 6. Эксплуатационные команды
-
-```bash
-docker compose exec app faervell-npc behavior scan --days 30
-docker compose exec app faervell-npc decision list
-docker compose exec app faervell-npc ingest data/sources.yaml
-```
-
-## 7. Секреты и сеть
-
-- `.env` не коммитится.
-- Compose привязывает порт 8080 к `127.0.0.1`; не меняйте это без reverse proxy и авторизации.
-- GM-only и private источники не должны маркироваться `PUBLIC_*`.
-- Поставьте лимит расходов у провайдера и в `PLANNER_DAILY_BUDGET_USD`.
-- Проверяйте backup восстановлением, а не только наличием файла.
