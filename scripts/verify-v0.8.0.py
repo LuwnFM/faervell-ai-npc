@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-EXPECTED_PERSONA_SHA256 = "ad4a463496c4655f7dc8e20e41ffaf1ff48da65f9011d8874f4793143bbf08e8"
+EXPECTED_PERSONA_SHA256 = "8085ffda1caf7b687fbeebe5c32cdf12a0925cb8c14fe5f19b4118d37d11a7e6"
 
 
 def require(condition: bool, message: str) -> None:
@@ -50,10 +50,13 @@ def main() -> None:
     require('__version__ = "0.8.0"' in init_text, "версия пакета не 0.8.0")
     require(re.search(r'(?m)^version\s*=\s*"0\.8\.0"', project_text) is not None, "версия pyproject не 0.8.0")
 
-    persona = (root / "behavior-pack/persona.md").read_bytes()
-    source = (root / "docs/stranger-persona-source.md").read_bytes()
+    persona = (root / "behavior-pack/persona.md").read_bytes().replace(b"\r\n", b"\n")
+    source = (root / "docs/stranger-persona-source.md").read_bytes().replace(b"\r\n", b"\n")
     require(persona == source, "persona и её архивная копия различаются")
-    require(hashlib.sha256(persona).hexdigest() == EXPECTED_PERSONA_SHA256, "личность Странника неполная или изменена")
+    require(
+        hashlib.sha256(persona).hexdigest() == EXPECTED_PERSONA_SHA256,
+        "личность Странника неполная или изменена",
+    )
 
     architecture = (root / "docs/architecture-source.md").read_text(encoding="utf-8")
     require("Версия системы:** `0.8.0`" in architecture, "архитектура не обновлена до 0.8.0")
