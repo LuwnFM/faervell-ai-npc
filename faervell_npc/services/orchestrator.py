@@ -416,7 +416,6 @@ class StrangerOrchestrator:
                 facts_allowed=facts,
                 memories_allowed=[self._memory_for_actor(memory) for memory in context.memories[:2]],
                 max_length_words=230,
-                ooc_note="Источники приложены сервером отдельно.",
             ),
             citations,
         )
@@ -543,4 +542,6 @@ class StrangerOrchestrator:
 
     @staticmethod
     def _source_fact(content: str, title: str) -> str:
-        return f"По источнику «{title}»: {content.strip()}"
+        # The title disambiguates the entity for the actor, but the wording must not invite
+        # a public citation footer. Citations themselves remain in ResponseBundle audit data.
+        return f"Официальные сведения об объекте «{title}»: {content.strip()}"

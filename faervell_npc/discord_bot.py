@@ -24,6 +24,7 @@ from faervell_npc.models import (
     ResponseBundle,
     ResponseFeedback,
     SceneConfig,
+    SourceRevision,
 )
 from faervell_npc.runtime import Runtime
 from faervell_npc.schemas import ActorPacket, IncomingMessage, ProcessResult, SceneContext
@@ -1231,17 +1232,38 @@ class FaervellBot(commands.Bot):
         try:
             async with SessionLocal() as session:
                 info = await self.runtime.knowledge.diagnostics(session)
-            if info.healthy:
+                architecture_present = bool(
+                    (
+                        await session.execute(
+                            select(SourceRevision.id)
+                            .where(SourceRevision.source_id == "architecture_source")
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                )
+
+            source_ids: set[str] | None = None
+            if info.healthy and architecture_present:
                 print(
                     "Knowledge bootstrap skipped: "
-                    f"wiki_documents={info.wiki_documents} chunks={info.chunks}"
+                    f"wiki_documents={info.wiki_documents} chunks={info.chunks} "
+                    "architecture_source=present"
                 )
                 return
-            print(f"Knowledge bootstrap started: {info.reason}")
+            if info.healthy and not architecture_present:
+                source_ids = {"architecture_source"}
+                print("Knowledge bootstrap started: architecture_source_missing")
+            else:
+                print(f"Knowledge bootstrap started: {info.reason}")
+
             ingestor = SourceIngestor()
             try:
                 async with SessionLocal() as session:
-                    report = await ingestor.ingest_manifest(session, Path("data/sources.yaml"))
+                    report = await ingestor.ingest_manifest(
+                        session,
+                        Path("data/sources.yaml"),
+                        source_ids=source_ids,
+                    )
                 print(
                     "Knowledge bootstrap finished: "
                     f"documents={report['documents']} chunks={report['chunks']} "
@@ -1437,10 +1459,7 @@ class FaervellBot(commands.Bot):
                 bundle.model_history = [*(bundle.model_history or []), model_name]
                 bundle.regeneration_count += 1
                 await session.commit()
-        await interaction.followup.send(
-            f"Ответ перегенерирован моделью **{model_name}**. Причина выбора: `{reason or '—'}`.",
-            ephemeral=True,
-        )
+        await interaction.followup.send("Ответ обновлён.", ephemeral=True)
 
     async def decide_gm_review(
         self,
@@ -2200,19 +2219,9 @@ class FaervellBot(commands.Bot):
 
     @staticmethod
     def _with_sources(text: str, citations: list[dict[str, str | None]]) -> str:
-        # Raw links and English source identifiers break RP immersion. Keep only readable
-        # Cyrillic titles; full URLs remain available in the audit log and feedback bundle.
-        unique: list[str] = []
-        for citation in citations:
-            title = str(citation.get("title") or "").strip()
-            if not title or re.search(r"[A-Za-z]", title):
-                continue
-            rendered = f"«{title}»"
-            if rendered not in unique:
-                unique.append(rendered)
-        if not unique:
-            return text
-        return text + "\n\n-# Источники: " + " • ".join(unique[:4])
+        """Keep citations in audit data, never append them to the public RP body."""
+        _ = citations
+        return text
 
     def _response_parts(self, text: str, *, enabled: bool, model: str) -> list[str]:
         parts = self._split_message(text)

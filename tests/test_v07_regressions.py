@@ -47,9 +47,9 @@ def test_fandom_infobox_is_indexed() -> None:
 
 
 def test_russian_title_stem_handles_iveltin_genitive() -> None:
-    terms = KnowledgeService._query_terms("Кто король Королевства Ивелтин и где находится Ивелтина?")
-    assert "ивелтин" in terms
-    assert "королевств" in terms
+    query = "Кто король Королевства Ивелтин и где находится Ивелтина?"
+    assert KnowledgeService._query_terms(query) == ["ивелтин"]
+    assert KnowledgeService._title_qualifiers(query) == ["королевств"]
 
 
 def test_plain_full_name_is_a_presentation() -> None:

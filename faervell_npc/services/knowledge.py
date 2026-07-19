@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import Float, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +33,13 @@ class KnowledgeService:
         "сейчас", "там", "это", "находится", "находятся", "про", "расскажи",
         "скажи", "известно", "ли", "и", "или", "в", "во", "на", "о", "об",
         "у", "для", "с", "со", "по", "король", "правитель",
+        "королевство", "государство", "республика", "империя", "княжество",
+        "правит", "управляет", "управление", "нынешний", "ныне", "глава",
+        "монарх", "расположение", "география", "континент", "регион",
+        "текущая", "текущий", "дата", "календарь", "сезон", "год",
+        # stems produced by the intentionally small Russian suffix stripper
+        "королевств", "государств", "республик", "импери", "княжеств",
+        "управля", "нынешн", "расположени", "географи", "календар",
     }
     _RUSSIAN_SUFFIXES = (
         "иями", "ями", "ами", "ого", "ему", "ому", "ыми", "ими", "иях",
@@ -71,7 +79,12 @@ class KnowledgeService:
         if not clean:
             return []
         expanded = self._expand_query(clean)
-        title_terms = self._query_terms(expanded)
+        # Title matching must use the player's original entity wording. Expanded field
+        # labels (ruler, geography, date) are useful for chunk ranking but would make
+        # unrelated pages such as any other kingdom look like exact title hits.
+        title_terms = self._query_terms(clean)
+        title_qualifiers = self._title_qualifiers(clean)
+        direct_title_terms = [*title_qualifiers, *title_terms]
         vector = self.embedder.embed(expanded)
         vector_similarity = 1.0 - KnowledgeChunk.embedding.cosine_distance(vector)
         searchable = func.concat_ws(" ", KnowledgeChunk.title, KnowledgeChunk.section, KnowledgeChunk.content)
@@ -89,17 +102,17 @@ class KnowledgeService:
             (func.lower(KnowledgeChunk.content).contains(normalized), literal(0.38)),
             else_=literal(0.0),
         )
-        if title_terms:
+        if direct_title_terms:
             title_token_rank = sum(
                 (
                     case(
                         (func.lower(KnowledgeChunk.title).contains(term), literal(1.0)),
                         else_=literal(0.0),
                     )
-                    for term in title_terms
+                    for term in direct_title_terms
                 ),
                 start=literal(0.0),
-            ) / len(title_terms)
+            ) / len(direct_title_terms)
         else:
             title_token_rank = literal(0.0)
         combined = cast(
@@ -128,16 +141,52 @@ class KnowledgeService:
         # Exact entity pages must not lose to semantically similar mechanics documents.
         # Fetch title hits first, then append the hybrid ranking with deduplication.
         if title_terms:
-            title_filters = [KnowledgeChunk.title.ilike(f"%{term}%") for term in title_terms]
-            direct_statement = (
-                select(KnowledgeChunk, SourceRevision.url, SourceRevision.revision)
-                .join(SourceRevision, SourceRevision.id == KnowledgeChunk.source_revision_id)
-                .where(*where, or_(*title_filters))
-                .order_by(SourceRevision.fetched_at.desc())
-                .limit(max(limit * 2, 8))
+            async def fetch_direct(terms: list[str]) -> list[Any]:
+                title_filters = [KnowledgeChunk.title.ilike(f"%{term}%") for term in terms]
+                direct_statement = (
+                    select(KnowledgeChunk, SourceRevision.url, SourceRevision.revision)
+                    .join(SourceRevision, SourceRevision.id == KnowledgeChunk.source_revision_id)
+                    # Entity type is only used together with the proper name. This prevents
+                    # "королевство" from selecting every kingdom, while still preferring
+                    # "Королевство Ивелтин" over "Республика Ивелтин".
+                    .where(*where, *title_filters)
+                    .order_by(SourceRevision.fetched_at.desc())
+                    .limit(max(limit * 12, 48))
+                )
+                return list((await session.execute(direct_statement)).all())
+
+            strict_terms = direct_title_terms or title_terms
+            direct_rows = await fetch_direct(strict_terms)
+            if not direct_rows and title_qualifiers:
+                # Some pages omit the expected type in the title. Fall back to the proper
+                # name rather than returning no canonical entity page at all.
+                direct_rows = await fetch_direct(title_terms)
+            scored_direct = sorted(
+                direct_rows,
+                key=lambda row: self._direct_chunk_score(
+                    row[0],
+                    clean=clean,
+                    expanded=expanded,
+                    title_terms=title_terms,
+                    title_qualifiers=title_qualifiers,
+                ),
+                reverse=True,
             )
-            direct_rows = (await session.execute(direct_statement)).all()
-            ranked_rows.extend((row[0], row[1], row[2], 1.25) for row in direct_rows)
+            ranked_rows.extend(
+                (
+                    row[0],
+                    row[1],
+                    row[2],
+                    self._direct_chunk_score(
+                        row[0],
+                        clean=clean,
+                        expanded=expanded,
+                        title_terms=title_terms,
+                        title_qualifiers=title_qualifiers,
+                    ),
+                )
+                for row in scored_direct
+            )
         try:
             result_rows = (await session.execute(statement)).all()
             ranked_rows.extend(
@@ -218,9 +267,74 @@ class KnowledgeService:
                     if len(stem) - len(suffix) >= 5 and stem.endswith(suffix):
                         stem = stem[: -len(suffix)]
                         break
+            if stem in cls._QUERY_STOPWORDS:
+                continue
             if len(stem) >= 4 and stem not in result:
                 result.append(stem)
         return result[:8]
+
+
+    @classmethod
+    def _title_qualifiers(cls, query: str) -> list[str]:
+        """Return entity-type stems only when the player explicitly implies them.
+
+        Qualifiers are never sufficient on their own; they are ANDed with a proper-name
+        stem. This keeps generic words from hijacking retrieval while distinguishing pages
+        such as «Королевство Ивелтин» and «Республика Ивелтин».
+        """
+        lowered = query.casefold()
+        qualifiers: list[str] = []
+        patterns = (
+            ("королевств", r"\b(?:королевств|корол[ьяею]|монарх)\w*"),
+            ("республик", r"\b(?:республик|президент)\w*"),
+            ("импери", r"\b(?:импери|император)\w*"),
+            ("княжеств", r"\b(?:княжеств|княз)\w*"),
+            ("герцогств", r"\b(?:герцогств|герцог)\w*"),
+        )
+        for stem, pattern in patterns:
+            if re.search(pattern, lowered) and stem not in qualifiers:
+                qualifiers.append(stem)
+        return qualifiers
+
+    @staticmethod
+    def _direct_chunk_score(
+        chunk: KnowledgeChunk,
+        *,
+        clean: str,
+        expanded: str,
+        title_terms: list[str],
+        title_qualifiers: list[str] | None = None,
+    ) -> float:
+        """Rank chunks only after their article title matched the requested entity."""
+        title = chunk.title.casefold()
+        section = (chunk.section or "").casefold()
+        content = chunk.content.casefold()
+        score = 2.0 + sum(0.5 for term in title_terms if term in title)
+        score += sum(0.35 for term in (title_qualifiers or []) if term in title)
+
+        lowered = clean.casefold()
+        requested_fields: list[tuple[str, tuple[str, ...]]] = []
+        if re.search(r"\b(?:корол|правител|монарх|глава|правит|управля)\w*", lowered):
+            requested_fields.append(("ruler", ("правитель", "король", "монарх", "глава")))
+        if re.search(r"\b(?:где|располож|местонахожд|континент|регион)\w*", lowered):
+            requested_fields.append(("location", ("расположение", "география", "континент", "регион")))
+        if re.search(r"\b(?:дата|число|день|год|сезон|календар)\w*", lowered):
+            requested_fields.append(("date", ("текущая дата", "календарь", "сезон", "год")))
+
+        for _field, hints in requested_fields:
+            if any(hint in content or hint in section for hint in hints):
+                score += 1.1
+        if section in {"карточка статьи", "введение", "основное"}:
+            score += 0.4
+
+        expanded_terms = {
+            token for token in re.findall(r"(?iu)[а-яёa-z0-9-]{4,}", expanded.casefold())
+            if token not in KnowledgeService._QUERY_STOPWORDS
+        }
+        if expanded_terms:
+            overlap = sum(1 for token in expanded_terms if token in content)
+            score += min(0.8, overlap * 0.08)
+        return score
 
     async def search_world(self, session: AsyncSession, query: str, *, limit: int | None = None) -> list[KnowledgeHit]:
         return await self.search(session, query, corpus=None, limit=limit)
@@ -248,7 +362,10 @@ class KnowledgeService:
         ).scalar_one_or_none()
         latest_run = (
             await session.execute(
-                select(KnowledgeImportRun).order_by(KnowledgeImportRun.started_at.desc()).limit(1)
+                select(KnowledgeImportRun)
+                .where(KnowledgeImportRun.source_id == "faervell_wiki_root")
+                .order_by(KnowledgeImportRun.started_at.desc())
+                .limit(1)
             )
         ).scalar_one_or_none()
         stale_before = datetime.now(UTC) - timedelta(hours=self.settings.knowledge_stale_hours)

@@ -17,6 +17,9 @@ class OutputGuard:
         "gm_reference": re.compile(r"(?<![\wа-яё])(?:гм|gm)(?![\wа-яё])", re.IGNORECASE),
         "admin_reference": re.compile(r"\b(?:администратор|модератор)\w*", re.IGNORECASE),
         "ticket_reference": re.compile(r"\b(?:тикет|заявк|одобрени)\w*", re.IGNORECASE),
+        "source_footer": re.compile(
+            r"(?im)^\s*(?:[-#]\s*)?(?:источник|источники)\s*:|\bпо источнику\b"
+        ),
     }
 
     MODERNISMS = {

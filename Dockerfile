@@ -7,5 +7,6 @@ COPY faervell_npc ./faervell_npc
 RUN pip install --no-cache-dir .
 COPY behavior-pack ./behavior-pack
 COPY data ./data
+COPY docs ./docs
 EXPOSE 8080
 CMD ["python", "-m", "faervell_npc.main"]

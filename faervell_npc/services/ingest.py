@@ -60,9 +60,12 @@ class SourceIngestor:
         manifest_path: Path,
         *,
         replace_source: bool = True,
+        source_ids: set[str] | None = None,
     ) -> dict[str, Any]:
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
         specs = manifest.get("sources") or []
+        if source_ids is not None:
+            specs = [spec for spec in specs if str(spec.get("id") or "") in source_ids]
         report: dict[str, Any] = {"sources": [], "documents": 0, "chunks": 0, "errors": []}
 
         for spec in specs:
