@@ -687,31 +687,26 @@ class StrangerCommands(commands.Cog):
         if interaction.guild_id is None or interaction.channel_id is None:
             await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         async with SessionLocal() as session:
             runtime = await session.get(GuildRuntimeSettings, str(interaction.guild_id))
             if runtime is None:
                 runtime = GuildRuntimeSettings(guild_id=str(interaction.guild_id))
                 session.add(runtime)
             runtime.gm_review_channel_id = str(interaction.channel_id)
-            pending_ids = list(
-                (
-                    await session.execute(
-                        select(GMReviewRequest.id).where(
-                            GMReviewRequest.guild_id == str(interaction.guild_id),
-                            GMReviewRequest.status == "PENDING",
-                            GMReviewRequest.gm_message_id.is_(None),
-                        )
-                    )
-                ).scalars()
-            )
             await session.commit()
-        await interaction.response.send_message(
+        posted, failed, reasons = await self.bot._retry_pending_gm_reviews(
+            guild_id=str(interaction.guild_id)
+        )
+        suffix = ""
+        if reasons:
+            suffix = "\nОшибки: " + "; ".join(reasons[:3])
+        await interaction.followup.send(
             "Этот канал назначен служебным каналом заявок Странника. "
-            f"Ожидающих отправки: **{len(pending_ids)}**.",
+            f"Отправлено ожидающих заявок: **{posted}**, не отправлено: **{failed}**."
+            + suffix,
             ephemeral=True,
         )
-        for review_id in pending_ids:
-            await self.bot._post_gm_review(review_id)
 
     @stranger.command(
         name="regeneration_limit",
@@ -1283,12 +1278,19 @@ class FaervellBot(commands.Bot):
         for review in reviews:
             if review.gm_message_id:
                 self.add_view(GMReviewView(self, review.id), message_id=int(review.gm_message_id))
+        restored_posted = 0
+        restored_failed = 0
         for review_id in unposted_review_ids:
-            await self._post_gm_review(review_id)
+            posted, _ = await self._post_gm_review(review_id)
+            if posted:
+                restored_posted += 1
+            else:
+                restored_failed += 1
         print(
             "Persistent views restored: "
             f"responses={len(bundles)} gm_reviews={len(reviews)} "
-            f"gm_reviews_retried={len(unposted_review_ids)}"
+            f"gm_reviews_retried={len(unposted_review_ids)} "
+            f"gm_reviews_posted={restored_posted} gm_reviews_failed={restored_failed}"
         )
 
     async def record_response_feedback(
@@ -1457,11 +1459,15 @@ class FaervellBot(commands.Bot):
         except discord.HTTPException:
             pass
 
-    async def _post_gm_review(self, review_id: str) -> None:
+    async def _post_gm_review(self, review_id: str) -> tuple[bool, str]:
         async with SessionLocal() as session:
             review = await session.get(GMReviewRequest, review_id)
-            if review is None or review.status != "PENDING" or review.gm_message_id:
-                return
+            if review is None:
+                return False, "заявка не найдена"
+            if review.status != "PENDING":
+                return True, "заявка уже обработана"
+            if review.gm_message_id:
+                return True, "заявка уже опубликована"
             runtime = await session.get(GuildRuntimeSettings, review.guild_id)
             configured = (
                 runtime.gm_review_channel_id if runtime and runtime.gm_review_channel_id else None
@@ -1476,7 +1482,7 @@ class FaervellBot(commands.Bot):
             )
             if not configured:
                 print(f"GM review pending without channel: id={review.id} reason={review.reason}")
-                return
+                return False, "служебный канал не назначен"
             payload = dict(review.payload or {})
             content = (
                 f"**Новая заявка Странника: {review.request_type}**\n"
@@ -1490,7 +1496,7 @@ class FaervellBot(commands.Bot):
             channel_id = int(configured)
         except (TypeError, ValueError):
             print(f"Configured GM review channel id is invalid: {configured!r}")
-            return
+            return False, "некорректный ID служебного канала"
         try:
             channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
@@ -1499,25 +1505,109 @@ class FaervellBot(commands.Bot):
                 f"review={review_id} channel={configured} "
                 f"error={type(exc).__name__}: {exc}"
             )
-            return
+            return False, f"не удалось открыть канал: {type(exc).__name__}"
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             print(f"Configured GM review channel is not text: {configured}")
-            return
+            return False, "назначенный объект не является текстовым каналом или веткой"
+
+        if isinstance(channel, discord.Thread):
+            try:
+                if channel.archived:
+                    await channel.edit(archived=False)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(
+                    "GM review thread unarchive failed: "
+                    f"review={review_id} channel={configured} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+            try:
+                await channel.join()
+            except (discord.Forbidden, discord.HTTPException, discord.ClientException) as exc:
+                print(
+                    "GM review thread join skipped/failed: "
+                    f"review={review_id} channel={configured} "
+                    f"error={type(exc).__name__}: {exc}"
+                )
+
+        member = channel.guild.me
+        if member is not None:
+            permissions = channel.permissions_for(member)
+            can_send = (
+                permissions.send_messages_in_threads
+                if isinstance(channel, discord.Thread)
+                else permissions.send_messages
+            )
+            if not can_send:
+                print(
+                    "GM review post blocked by permissions: "
+                    f"review={review_id} channel={configured} thread={isinstance(channel, discord.Thread)}"
+                )
+                return False, "у бота нет права отправлять сообщения в служебный канал"
         try:
-            sent = await channel.send(content, view=GMReviewView(self, review_id))
+            sent = await channel.send(
+                content,
+                view=GMReviewView(self, review_id),
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,
+                    roles=False,
+                    everyone=False,
+                    replied_user=False,
+                ),
+            )
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
             print(
                 "GM review post failed: "
                 f"review={review_id} channel={configured} "
                 f"error={type(exc).__name__}: {exc}"
             )
-            return
+            return False, f"Discord отклонил сообщение: {type(exc).__name__}"
         async with SessionLocal() as session:
             review = await session.get(GMReviewRequest, review_id)
             if review is not None:
                 review.gm_message_id = str(sent.id)
                 await session.commit()
         print(f"GM review posted: review={review_id} channel={configured} message={sent.id}")
+        return True, "опубликовано"
+
+    async def _retry_pending_gm_reviews(
+        self,
+        *,
+        guild_id: str,
+        scene_id: str | None = None,
+        source_channel_id: str | None = None,
+        limit: int = 100,
+    ) -> tuple[int, int, list[str]]:
+        conditions = [
+            GMReviewRequest.guild_id == guild_id,
+            GMReviewRequest.status == "PENDING",
+            GMReviewRequest.gm_message_id.is_(None),
+        ]
+        if scene_id:
+            conditions.append(GMReviewRequest.scene_id == scene_id)
+        if source_channel_id:
+            conditions.append(GMReviewRequest.channel_id == source_channel_id)
+        async with SessionLocal() as session:
+            review_ids = list(
+                (
+                    await session.execute(
+                        select(GMReviewRequest.id)
+                        .where(*conditions)
+                        .order_by(GMReviewRequest.created_at.asc())
+                        .limit(limit)
+                    )
+                ).scalars()
+            )
+        posted = 0
+        failed = 0
+        reasons: list[str] = []
+        for review_id in review_ids:
+            ok, reason = await self._post_gm_review(review_id)
+            if ok:
+                posted += 1
+            else:
+                failed += 1
+                reasons.append(f"{review_id[:8]}: {reason}")
+        return posted, failed, reasons
 
     async def _send_process_result(
         self,
@@ -1578,8 +1668,26 @@ class FaervellBot(commands.Bot):
                 stored_bundle.message_ids = [str(item.id) for item in sent_messages]
                 stored_bundle.last_message_id = str(sent_messages[-1].id)
                 await session.commit()
+        explicit_posted = False
         if result.gm_review_request_id:
-            await self._post_gm_review(result.gm_review_request_id)
+            explicit_posted, reason = await self._post_gm_review(result.gm_review_request_id)
+            if not explicit_posted:
+                print(
+                    "GM review explicit delivery failed: "
+                    f"review={result.gm_review_request_id} reason={reason}"
+                )
+        posted, failed, reasons = await self._retry_pending_gm_reviews(
+            guild_id=guild_id,
+            scene_id=scene.scene_id,
+            source_channel_id=str(source_message.channel.id),
+            limit=20,
+        )
+        if posted or failed:
+            print(
+                "GM review delivery sweep: "
+                f"guild={guild_id} scene={scene.scene_id} explicit={explicit_posted} "
+                f"posted={posted} failed={failed} reasons={reasons[:3]}"
+            )
 
     async def close(self) -> None:
         if self._presence_task is not None:

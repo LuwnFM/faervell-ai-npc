@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,11 @@ from faervell_npc.services.stagecraft import choose_opener
 
 
 class ActorService:
+    MODERATION_FACT_PATTERN = re.compile(
+        r"(?iu)(?<![\wа-яё])(?:гм|gm)(?![\wа-яё])|"
+        r"\b(?:администратор|модератор|тикет|заявк|одобрени)\w*"
+    )
+
     def __init__(self, llm: OpenRouterClient) -> None:
         self.settings = get_settings()
         self.llm = llm
@@ -101,6 +107,17 @@ class ActorService:
         if action_result.get("status") in {"PENDING_GM", "PENDING_REVIEW"}:
             action_result["status"] = "PENDING"
         data["action_result"] = action_result
+        facts = [
+            str(item)
+            for item in data.get("facts_allowed") or []
+            if not ActorService.MODERATION_FACT_PATTERN.search(str(item))
+        ]
+        if not facts and action_result.get("status") == "PENDING":
+            facts = [
+                "Мне нужно сперва уточнить детали и условия этого дела.",
+                "Пока я не обещаю поручение или награду.",
+            ]
+        data["facts_allowed"] = facts
         data["ooc_note"] = None
         return data
 
@@ -113,12 +130,17 @@ class ActorService:
         ]
         opener = choose_opener(recent_npc, f"{context.scene_id}:{packet.response_type}:{len(recent_npc)}")
         lead = f"*{opener}*"
+        safe_facts = [
+            fact
+            for fact in packet.facts_allowed
+            if not ActorService.MODERATION_FACT_PATTERN.search(fact)
+        ]
 
         if packet.response_type == ResponseType.MECHANICS_ANSWER:
-            facts = " ".join(packet.facts_allowed[:5]) or "В доступных правилах точного ответа нет."
+            facts = " ".join(safe_facts[:5]) or "В доступных правилах точного ответа нет."
             return f"{lead}\n\n— {facts}"
         if packet.response_type == ResponseType.LORE_ANSWER:
-            facts = " ".join(packet.facts_allowed[:5]) or "Надёжного ответа в известных мне записях нет."
+            facts = " ".join(safe_facts[:5]) or "Надёжного ответа в известных мне записях нет."
             offer = ""
             if packet.disclosure_offer and packet.disclosure_offer.type != "NONE":
                 description = packet.disclosure_offer.description or "соразмерный обмен"
@@ -132,7 +154,7 @@ class ActorService:
             return f"{lead}\n\n— Есть дело рядом: {quest.title}.{reward}"
         if packet.response_type == ResponseType.SAFE_UNKNOWN:
             return f"{lead}\n\n— Не стану обещать правду там, где у меня нет подтверждения."
-        facts = " ".join(packet.facts_allowed[:4])
+        facts = " ".join(safe_facts[:4])
         if facts:
             return f"{lead}\n\n— {facts}"
         return f"{lead}\n\n— Слушаю."

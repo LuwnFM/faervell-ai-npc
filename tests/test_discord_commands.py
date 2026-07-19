@@ -19,6 +19,7 @@ def test_required_slash_commands_are_registered_in_group() -> None:
         "locations_sync",
         "permissions",
         "commands_sync",
+        "gm_channel",
     }.issubset(names)
 
 
