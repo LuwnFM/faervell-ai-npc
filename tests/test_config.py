@@ -19,3 +19,11 @@ def test_empty_role_and_model_lists_parse_without_json() -> None:
         "openai/gpt-5-nano",
         "google/gemini-2.5-flash-lite",
     ]
+
+
+def test_presence_defaults_are_safe() -> None:
+    settings = Settings()
+    assert settings.traveler_presence_enabled
+    assert 0 <= settings.traveler_default_appearance_probability <= 1
+    assert 0 <= settings.traveler_summon_move_chance <= 1
+    assert settings.discord_reply_hint_text

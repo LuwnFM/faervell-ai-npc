@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     max_retrieved_memories: int = 5
     max_retrieved_knowledge: int = 6
     bot_reply_cooldown_seconds: int = 2
+    discord_reply_hint_text: str = (
+        "Чтобы продолжить разговор со Странником, упомяните его в своём сообщении "
+        "или ответьте на один из его постов."
+    )
+    traveler_presence_enabled: bool = True
+    traveler_movement_interval_seconds: int = Field(default=600, ge=30)
+    traveler_default_appearance_probability: float = Field(default=0.20, ge=0.0, le=1.0)
+    traveler_summon_move_chance: float = Field(default=0.75, ge=0.0, le=1.0)
+    traveler_cross_location_min_score: float = Field(default=0.58, ge=0.0, le=1.0)
     character_match_threshold: float = 0.22
     character_match_margin: float = 0.04
 

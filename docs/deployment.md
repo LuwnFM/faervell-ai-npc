@@ -11,7 +11,7 @@ cp .env.example .env
 nano .env
 ```
 
-Обязательно измените `POSTGRES_PASSWORD`, пароль в `DATABASE_URL`, `PSEUDONYM_SECRET`, `DISCORD_TOKEN`. Ключ OpenRouter можно оставить пустым для локального режима.
+Обязательно измените `POSTGRES_PASSWORD`, пароль в `DATABASE_URL`, `PSEUDONYM_SECRET`, `DISCORD_TOKEN`. Ключ OpenRouter можно оставить пустым для локального режима. Для реестра персонажей укажите `DISCORD_CHARACTER_REGISTRY_CHANNEL_ID`. Параметры перемещения `TRAVELER_*` имеют безопасные значения по умолчанию и могут отсутствовать в старом production `.env`.
 
 ## 2. Запуск
 
@@ -34,7 +34,17 @@ curl http://127.0.0.1:8080/health
 curl http://127.0.0.1:8080/ready
 ```
 
-В Discord выполните `/stranger scene_enable`, `/stranger character_bind`, `/stranger status`.
+В Discord зарегистрируйте каналы-локации и проверьте присутствие:
+
+```text
+/stranger scene_enable location:Рынок Харгатрена mask:herbalist
+/stranger appearance_chance percent:20
+/stranger reply_hint enabled:true
+/stranger cross_location_summons enabled:true
+/stranger status
+```
+
+Странник отвечает только в текущей локации. Осмысленный пинг из другой включённой сцены ставит её следующей целью. Для немедленного теста используйте `/stranger move_here`.
 
 ## 4. Обновление
 
@@ -67,7 +77,7 @@ docker compose exec app faervell-npc ingest data/sources.yaml
 ## 7. Секреты и сеть
 
 - `.env` не коммитится.
-- Порт 8080 оставьте доступным только localhost/VPN либо закройте firewall.
+- Compose привязывает порт 8080 к `127.0.0.1`; не меняйте это без reverse proxy и авторизации.
 - GM-only и private источники не должны маркироваться `PUBLIC_*`.
 - Поставьте лимит расходов у провайдера и в `PLANNER_DAILY_BUDGET_USD`.
 - Проверяйте backup восстановлением, а не только наличием файла.

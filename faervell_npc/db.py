@@ -40,6 +40,28 @@ async def init_db() -> None:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight forward-compatible migrations for existing MVP databases.
+        # create_all() creates new tables but does not add columns to existing ones.
+        await conn.execute(
+            text(
+                "ALTER TABLE scene_configs "
+                "ADD COLUMN IF NOT EXISTS reply_hint_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE scene_configs "
+                "ADD COLUMN IF NOT EXISTS appearance_probability DOUBLE PRECISION "
+                "NOT NULL DEFAULT 0.20"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE scene_configs "
+                "ADD COLUMN IF NOT EXISTS arrival_announcement_enabled BOOLEAN "
+                "NOT NULL DEFAULT TRUE"
+            )
+        )
         await conn.execute(
             text(
                 """

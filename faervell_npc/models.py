@@ -90,7 +90,57 @@ class SceneConfig(Base):
     location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     profession_mask_id: Mapped[str] = mapped_column(String(64), default="traveler")
     response_mode: Mapped[str] = mapped_column(String(32), default="MENTION_OR_REPLY")
+    reply_hint_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    appearance_probability: Mapped[float] = mapped_column(
+        Float, default=settings.traveler_default_appearance_probability
+    )
+    arrival_announcement_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class TravelerPresence(Base):
+    __tablename__ = "traveler_presence"
+
+    traveler_entity_id: Mapped[str] = mapped_column(
+        String(64), primary_key=True, default="traveler_01"
+    )
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    current_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    current_scene_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_location_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    current_location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    next_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    next_scene_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    next_location_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    next_location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    next_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_source_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    next_requested_by_discord_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    next_priority: Mapped[float] = mapped_column(Float, default=0.0)
+    cross_location_summons_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class TravelRequest(Base):
+    __tablename__ = "traveler_travel_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    source_channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    target_scene_id: Mapped[str] = mapped_column(String(64), index=True)
+    target_location_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    requester_discord_user_id: Mapped[str] = mapped_column(String(32), index=True)
+    source_message_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    content_excerpt: Mapped[str] = mapped_column(Text, default="")
+    classification: Mapped[str] = mapped_column(String(32), index=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    scheduled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class CharacterBinding(Base):

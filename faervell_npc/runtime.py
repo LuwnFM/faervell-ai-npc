@@ -16,6 +16,7 @@ from faervell_npc.services.local_planner import LocalPlanner
 from faervell_npc.services.memory import MemoryService
 from faervell_npc.services.orchestrator import StrangerOrchestrator
 from faervell_npc.services.planner import PlannerService
+from faervell_npc.services.presence import PresenceService
 from faervell_npc.services.router import IntentRouter
 from faervell_npc.services.rules import RuleEngine
 from faervell_npc.services.tools import ToolExecutor
@@ -26,6 +27,7 @@ class Runtime:
     llm: OpenRouterClient
     locks: SceneLockManager
     characters: CharacterRegistryService
+    presence: PresenceService
     orchestrator: StrangerOrchestrator
 
     async def close(self) -> None:
@@ -36,6 +38,7 @@ class Runtime:
 def build_runtime() -> Runtime:
     memory = MemoryService()
     characters = CharacterRegistryService()
+    presence = PresenceService()
     contexts = SceneContextBuilder(memory, characters)
     router = IntentRouter()
     knowledge = KnowledgeService()
@@ -65,5 +68,6 @@ def build_runtime() -> Runtime:
         llm=llm,
         locks=SceneLockManager(),
         characters=characters,
+        presence=presence,
         orchestrator=orchestrator,
     )

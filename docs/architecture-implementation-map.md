@@ -4,6 +4,10 @@
 |---|---|
 | Четыре маршрута CHAT / MECHANICS / LORE / PLANNER | `services/router.py`, `services/orchestrator.py` |
 | Одна сущность Странника и профессиональные маски | `SceneConfig.profession_mask_id`, единый `holder_entity_id=traveler_01`, `behavior-pack/profession-masks.yaml` |
+| Единое присутствие и вероятностное появление по локациям | `TravelerPresence`, `PresenceService.tick`, `SceneConfig.appearance_probability` |
+| Осмысленные пинги из других локаций | `PresenceService.assess_cross_location_ping`, `TravelRequest`, очередь `next_*` |
+| Подсказка пинг/reply под RP-постами | `SceneConfig.reply_hint_enabled`, `/stranger reply_hint`, `FaervellBot._reply_parts` |
+| Реестр игровых персонажей и представление | `CharacterProfile`, `SceneCharacterIdentity`, `CharacterRegistryService`, `/stranger characters_sync` |
 | Общая память между масками, но раздельные персонажи | `TravelerMemory.character_id`, `observed_under_mask`, `CharacterBinding` |
 | Сырой неизменяемый архив | `conversation_messages` + PostgreSQL trigger `forbid_conversation_message_mutation` |
 | Утверждения игроков не становятся каноном | `MemoryPerspective.PLAYER_SAID`, `TrustStatus.UNVERIFIED`, формулировка «Персонаж сообщил…» |
