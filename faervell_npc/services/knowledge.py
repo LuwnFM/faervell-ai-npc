@@ -124,12 +124,26 @@ class KnowledgeService:
             .limit(limit)
         )
         ranked_rows: list[tuple[KnowledgeChunk, str | None, str | None, float]] = []
+
+        # Exact entity pages must not lose to semantically similar mechanics documents.
+        # Fetch title hits first, then append the hybrid ranking with deduplication.
+        if title_terms:
+            title_filters = [KnowledgeChunk.title.ilike(f"%{term}%") for term in title_terms]
+            direct_statement = (
+                select(KnowledgeChunk, SourceRevision.url, SourceRevision.revision)
+                .join(SourceRevision, SourceRevision.id == KnowledgeChunk.source_revision_id)
+                .where(*where, or_(*title_filters))
+                .order_by(SourceRevision.fetched_at.desc())
+                .limit(max(limit * 2, 8))
+            )
+            direct_rows = (await session.execute(direct_statement)).all()
+            ranked_rows.extend((row[0], row[1], row[2], 1.25) for row in direct_rows)
         try:
             result_rows = (await session.execute(statement)).all()
-            ranked_rows = [
+            ranked_rows.extend(
                 (row[0], row[1], row[2], float(row[3] or 0.0))
                 for row in result_rows
-            ]
+            )
         except Exception:
             # websearch_to_tsquery may reject unusual punctuation. Retrying with a simpler
             # containment query is preferable to returning an empty knowledge packet.
@@ -147,10 +161,14 @@ class KnowledgeService:
                 .limit(limit)
             )
             fallback_rows = (await session.execute(fallback)).all()
-            ranked_rows = [(row[0], row[1], row[2], 0.5) for row in fallback_rows]
+            ranked_rows.extend((row[0], row[1], row[2], 0.5) for row in fallback_rows)
 
         hits: list[KnowledgeHit] = []
+        seen_chunks: set[str] = set()
         for chunk, url, revision, score in ranked_rows:
+            if chunk.id in seen_chunks:
+                continue
+            seen_chunks.add(chunk.id)
             hits.append(
                 KnowledgeHit(
                     id=chunk.id,
@@ -167,8 +185,9 @@ class KnowledgeService:
                     metadata=dict(chunk.metadata_json or {}),
                 )
             )
+            if len(hits) >= limit:
+                break
         return hits
-
 
     @staticmethod
     def _expand_query(query: str) -> str:

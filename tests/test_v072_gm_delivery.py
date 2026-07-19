@@ -104,7 +104,7 @@ async def test_pending_local_quest_keeps_review_id_and_hides_gm() -> None:
         context=_context(),
     )
     assert packet.action_result["gm_review_request_id"] == "review-1"
-    assert tools.calls == ["create_gm_review"]
+    assert tools.calls == ["commit_quest"]
     joined = " ".join(packet.facts_allowed).casefold()
     assert "гм" not in joined
     assert "заявк" not in joined

@@ -5,6 +5,7 @@ import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from faervell_npc.config import get_settings
 from faervell_npc.schemas import (
     ActorPacket,
     QuestDraft,
@@ -18,6 +19,9 @@ from faervell_npc.services.tools import ToolExecutor
 
 class LocalPlanner:
     QUEST_TERMS = re.compile(r"(?iu)\b(?:квест|задани[ея]|работ[ау]|поручени[ея]|дело)\b")
+    QUEST_DETAILS = re.compile(
+        r"(?iu)(?:какое|какая|услови|подроб|расскаж|что\s+(?:делать|сделать)|напомни|суть|награда|оплата)"
+    )
     QUEST_STOP_WORDS = {
         "квест",
         "задание",
@@ -39,10 +43,15 @@ class LocalPlanner:
         "дороги",
         "опасности",
         "события",
+        "соседнем",
+        "соседний",
+        "регионе",
+        "регион",
     }
 
     def __init__(self, tools: ToolExecutor) -> None:
         self.tools = tools
+        self.settings = get_settings()
 
     async def try_handle(
         self,
@@ -83,27 +92,35 @@ class LocalPlanner:
                     max_length_words=150,
                 )
 
-        if context.active_quests and any(
-            phrase in lowered
-            for phrase in ("напомни задание", "напомни квест", "что за задание", "какая работа")
+        if context.active_quests and (
+            self.QUEST_DETAILS.search(player_message)
+            or any(
+                phrase in lowered
+                for phrase in (
+                    "что за задание",
+                    "какая работа",
+                    "какое дело",
+                    "что мне сделать",
+                    "чего что",
+                )
+            )
         ):
-            facts = [
-                f"Активный квест «{quest['title']}», статус {quest['status']}."
-                for quest in context.active_quests[:3]
-            ]
+            quest = self._best_active_quest(context.active_quests)
             return ActorPacket(
                 response_type=ResponseType.QUEST_PROGRESS,
                 scene_id=context.scene_id,
                 player_name=context.player_name,
                 profession_mask_id=context.profession_mask_id,
                 location_name=context.location_name,
-                facts_allowed=facts,
-                action_result={"active_quests": context.active_quests[:3]},
-                max_length_words=170,
+                facts_allowed=self._quest_facts(quest),
+                action_result={"active_quest": quest},
+                max_length_words=210,
             )
 
         if self.QUEST_TERMS.search(player_message):
-            return await self._grounded_local_quest(session, player_message=player_message, context=context)
+            return await self._grounded_local_quest(
+                session, player_message=player_message, context=context
+            )
 
         return None
 
@@ -114,32 +131,23 @@ class LocalPlanner:
         player_message: str,
         context: SceneContext,
     ) -> ActorPacket:
-        location = context.location_path or context.location_name or "текущая локация"
+        current_location = context.location_path or context.location_name or "текущая локация"
+        destination = self._requested_destination(player_message) or current_location
         hits = await self.tools.knowledge.search_world(
             session,
-            f"{location} местность дороги опасности события {player_message}",
-            limit=5,
+            f"{destination} {current_location} местность дороги опасности события {player_message}",
+            limit=8,
         )
         relevant_hits = [
             hit
             for hit in hits
             if self._quest_evidence_is_relevant(
-                location=location,
+                location=destination,
                 player_message=player_message,
                 title=hit.title,
                 content=hit.content,
             )
         ]
-        if not relevant_hits:
-            return await self._pending_review_packet(
-                session,
-                player_message=player_message,
-                context=context,
-                location=location,
-                reason="Не найдено канонического основания для локального задания",
-                candidate_titles=[hit.title for hit in hits[:5]],
-            )
-
         evidence_pool = {
             hit.id: {
                 "knowledge_id": hit.id,
@@ -151,23 +159,17 @@ class LocalPlanner:
             }
             for hit in relevant_hits
         }
-        top = relevant_hits[0]
-        safe_title = (context.location_name or location).strip("#<> ")
-        quest = QuestDraft(
-            title=f"Проверить дорогу у {safe_title}",
-            template_id="FIND_LOCATION",
-            objectives=[QuestObjectiveDraft(id="locate", type="FIND_LOCATION", quantity=1)],
-            reward_amount=0,
-            repeatable=False,
-            gm_approval_required=True,
-            evidence=[top.id],
+        quest = self._build_quest(
+            player_message=player_message,
+            destination=destination,
+            evidence_ids=[hit.id for hit in relevant_hits[:3]],
         )
         committed = await self.tools.execute(
             session,
             ToolRequest(
                 name="commit_quest",
                 arguments=quest.model_dump_json(),
-                purpose="Создать локальное задание, подтверждённое источником, и отправить ГМ на одобрение",
+                purpose="Создать конкретный проект задания и передать его на служебное подтверждение",
             ),
             scene_id=context.scene_id,
             character_id=context.character_id,
@@ -175,34 +177,18 @@ class LocalPlanner:
             location_id=context.location_id,
             evidence_pool=evidence_pool,
         )
-        review_id = committed.get("gm_review_request_id") if isinstance(committed, dict) else None
-        if not review_id:
-            review = await self.tools.execute(
+        action_result = committed if isinstance(committed, dict) else {}
+        if not action_result.get("committed"):
+            return await self._review_only_packet(
                 session,
-                ToolRequest(
-                    name="create_gm_review",
-                    arguments=json.dumps(
-                        {
-                            "request_type": "QUEST",
-                            "reason": "Локальное задание требует служебного подтверждения",
-                            "payload": {
-                                "player_message": player_message,
-                                "location": location,
-                                "quest": quest.model_dump(mode="json"),
-                                "candidate_source": top.title,
-                            },
-                        },
-                        ensure_ascii=False,
-                    ),
-                    purpose="Создать служебную заявку для локального задания",
-                ),
-                scene_id=context.scene_id,
-                character_id=context.character_id,
-                profession_mask_id=context.profession_mask_id,
-                location_id=context.location_id,
-                evidence_pool=evidence_pool,
+                player_message=player_message,
+                context=context,
+                current_location=current_location,
+                quest=quest,
+                reason="Проект задания не прошёл автоматическую проверку",
+                candidate_titles=[hit.title for hit in hits[:5]],
             )
-            review_id = review.get("gm_review_request_id") if isinstance(review, dict) else None
+
         return ActorPacket(
             response_type=ResponseType.DIALOGUE,
             scene_id=context.scene_id,
@@ -210,23 +196,23 @@ class LocalPlanner:
             profession_mask_id=context.profession_mask_id,
             location_name=context.location_name,
             facts_allowed=[
-                f"У меня есть замысел дела неподалёку от {safe_title}, но сперва нужно уточнить его условия.",
-                "Пока не обещаю награду и не отправляю тебя в путь; вернусь к этому предложению, когда всё прояснится.",
+                f"Я могу предложить дело «{quest.title}».",
+                quest.description,
+                "Пока не отправляю тебя в путь: сперва уточню окончательные условия и плату.",
             ],
-            action_result={
-                **(committed if isinstance(committed, dict) else {}),
-                "gm_review_request_id": review_id,
-            },
-            max_length_words=150,
+            action_result={**action_result, "quest": quest.model_dump(mode="json")},
+            quest_summary=quest,
+            max_length_words=180,
         )
 
-    async def _pending_review_packet(
+    async def _review_only_packet(
         self,
         session: AsyncSession,
         *,
         player_message: str,
         context: SceneContext,
-        location: str,
+        current_location: str,
+        quest: QuestDraft,
         reason: str,
         candidate_titles: list[str],
     ) -> ActorPacket:
@@ -240,13 +226,14 @@ class LocalPlanner:
                         "reason": reason,
                         "payload": {
                             "player_message": player_message,
-                            "location": location,
+                            "location": current_location,
+                            "quest": quest.model_dump(mode="json"),
                             "candidate_titles": candidate_titles,
                         },
                     },
                     ensure_ascii=False,
                 ),
-                purpose="Создать служебную заявку для локального задания",
+                purpose="Передать конкретный проект задания на служебное подтверждение",
             ),
             scene_id=context.scene_id,
             character_id=context.character_id,
@@ -261,12 +248,123 @@ class LocalPlanner:
             profession_mask_id=context.profession_mask_id,
             location_name=context.location_name,
             facts_allowed=[
-                "Мне нужно сперва уточнить детали этого дела.",
-                "Пока не обещаю поручение или награду; вернусь к разговору, когда всё станет ясно.",
+                f"Я наметил дело «{quest.title}».",
+                quest.description,
+                "Мне нужно уточнить окончательные условия и плату; после этого назову их без недомолвок.",
             ],
-            action_result=review if isinstance(review, dict) else {},
-            max_length_words=120,
+            action_result={
+                **(review if isinstance(review, dict) else {}),
+                "quest": quest.model_dump(mode="json"),
+            },
+            quest_summary=quest,
+            max_length_words=180,
         )
+
+    def _build_quest(
+        self,
+        *,
+        player_message: str,
+        destination: str,
+        evidence_ids: list[str],
+    ) -> QuestDraft:
+        destination = self._clean_location(destination)
+        lowered = player_message.casefold()
+        if any(token in lowered for token in ("развед", "проверь", "дорог", "путь", "перевал")):
+            title = f"Разведать путь к {destination}"
+            description = (
+                f"Добраться до подступов к {destination}, проверить проходимость дороги и "
+                "вернуться с кратким описанием опасных участков."
+            )
+            template = "FIND_LOCATION"
+            objective = QuestObjectiveDraft(id="route", type="FIND_LOCATION", quantity=1)
+        else:
+            title = f"Доставить запечатанный пакет в {destination}"
+            description = (
+                f"Донести запечатанный дорожный пакет до безопасного места в {destination} "
+                "и вернуться с подтверждением передачи."
+            )
+            template = "DELIVER_ITEM"
+            objective = QuestObjectiveDraft(id="delivery", type="DELIVER", quantity=1)
+        reward = self.settings.quest_default_reward_amount
+        currency = self.settings.quest_default_reward_currency
+        return QuestDraft(
+            title=title,
+            template_id=template,
+            description=description,
+            location_name=destination,
+            objectives=[objective],
+            reward_currency_id=currency,
+            reward_amount=reward,
+            reward_note="Плата выдаётся после подтверждения выполнения.",
+            repeatable=False,
+            gm_approval_required=True,
+            evidence=evidence_ids,
+        )
+
+    @staticmethod
+    def _best_active_quest(quests: list[dict[str, object]]) -> dict[str, object]:
+        for status in ("ACTIVE", "PENDING_GM", "DRAFT"):
+            for quest in reversed(quests):
+                if quest.get("status") == status:
+                    return quest
+        return quests[-1]
+
+    @staticmethod
+    def _quest_facts(quest: dict[str, object]) -> list[str]:
+        facts = [f"Дело называется «{quest.get('title') or 'без названия'}»." ]
+        description = str(quest.get("description") or "").strip()
+        if description:
+            facts.append(description)
+        location = str(quest.get("location_name") or "").strip()
+        if location:
+            facts.append(f"Место выполнения: {location}.")
+        reward = quest.get("reward") or {}
+        if isinstance(reward, dict) and reward.get("amount"):
+            facts.append(
+                f"Награда: {float(reward['amount']):g} {reward.get('currency_id') or 'местных монет'}."
+            )
+        reward_note = str(quest.get("reward_note") or "").strip()
+        if reward_note:
+            facts.append(reward_note)
+        objectives = quest.get("objectives") or []
+        if isinstance(objectives, list) and objectives:
+            readable = {
+                "DELIVER": "доставить пакет и получить подтверждение передачи",
+                "FIND_LOCATION": "проверить путь и вернуться с описанием дороги",
+                "INVESTIGATE": "осмотреть место и сообщить результаты",
+                "ESCORT": "сопроводить путника до указанного места",
+            }
+            for item in objectives[:3]:
+                if isinstance(item, dict):
+                    facts.append(f"Задача: {readable.get(str(item.get('type')), 'выполнить поручение')}.")
+        status = str(quest.get("status") or "")
+        if status == "PENDING_GM":
+            facts.append("Окончательные условия ещё уточняются; в путь пока не отправляю.")
+        elif status == "ACTIVE":
+            facts.append("Условия подтверждены, задание можно выполнять.")
+        return facts
+
+    @staticmethod
+    def _requested_destination(message: str) -> str | None:
+        patterns = (
+            r"(?iu)(?:регион\w*|локаци\w*|местност\w*)\s*[-—:]\s*([^,.!?\n]{3,70})",
+            r"(?iu)\b(?:в|до|на)\s+(?:соседн\w+\s+(?:регион\w*|локаци\w*)\s*)?([^,.!?\n]{3,70})",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if not match:
+                continue
+            candidate = LocalPlanner._clean_location(match.group(1))
+            if candidate and candidate.casefold() not in {"текущей локации", "этом месте"}:
+                return candidate
+        return None
+
+    @staticmethod
+    def _clean_location(value: str) -> str:
+        value = re.sub(r"[<>#]", "", value)
+        value = re.sub(r"(?iu)\b(?:ведь|пожалуйста|мне|любое|любой|задание)\b.*$", "", value)
+        value = re.sub(r"\s+", " ", value).strip(" —-:,.!?\n\t")
+        return value or "текущей локации"
 
     @classmethod
     def _quest_evidence_is_relevant(
@@ -281,7 +379,12 @@ class LocalPlanner:
         if not query_tokens:
             return False
         evidence_tokens = cls._meaningful_tokens(f"{title} {content[:3000]}")
-        return bool(query_tokens.intersection(evidence_tokens))
+        # A generic economy page is not enough to ground a location quest. At least one
+        # destination/name token must be present in the source title or body.
+        location_tokens = cls._meaningful_tokens(location)
+        return bool(query_tokens.intersection(evidence_tokens)) and (
+            not location_tokens or bool(location_tokens.intersection(evidence_tokens))
+        )
 
     @classmethod
     def _meaningful_tokens(cls, text: str) -> set[str]:

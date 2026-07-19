@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from faervell_npc.models import Quest, SceneConfig
+from faervell_npc.models import Quest, QuestObjective, SceneConfig
 from faervell_npc.schemas import IncomingMessage, SceneContext
 from faervell_npc.services.characters import (
     CharacterRegistryService,
@@ -68,6 +70,16 @@ class SceneContextBuilder:
                 )
             )
         ).scalars().all()
+        objective_rows = (
+            await session.execute(
+                select(QuestObjective).where(
+                    QuestObjective.quest_id.in_([quest.id for quest in active_quests] or ["-"])
+                )
+            )
+        ).scalars().all()
+        objectives_by_quest: dict[str, list[QuestObjective]] = {}
+        for objective in objective_rows:
+            objectives_by_quest.setdefault(objective.quest_id, []).append(objective)
         return SceneContext(
             scene_id=scene.scene_id,
             location_id=scene.location_id,
@@ -94,6 +106,18 @@ class SceneContextBuilder:
                     "title": quest.title,
                     "status": quest.status,
                     "template": quest.template_id,
+                    "description": str((quest.constraints or {}).get("description") or ""),
+                    "location_name": (quest.constraints or {}).get("location_name"),
+                    "reward_note": (quest.constraints or {}).get("reward_note"),
+                    "reward": dict(quest.reward or {}),
+                    "objectives": [
+                        {
+                            "type": item.objective_type,
+                            "quantity": item.quantity,
+                            "status": item.status,
+                        }
+                        for item in objectives_by_quest.get(quest.id, [])
+                    ],
                 }
                 for quest in active_quests
             ],
@@ -101,6 +125,7 @@ class SceneContextBuilder:
             scene_state={
                 "mood": "спокойно-заинтересованный",
                 "current_goal": "слушать собеседника, отвечать по делу и не принимать его заявления за доказанный факт",
+                **self._interaction_guidance(incoming.content),
                 "current_activity": self.stagecraft.choose_activity(
                     scene.profession_mask_id,
                     scene_id=scene.scene_id,
@@ -109,3 +134,31 @@ class SceneContextBuilder:
                 "location_path": scene.location_path or scene.location_name,
             },
         )
+
+    @staticmethod
+    def _interaction_guidance(content: str) -> dict[str, object]:
+        lowered = content.casefold()
+        attack = bool(
+            re.search(
+                r"(?iu)\b(?:удар|атак|протык|пронз|реж|руб|отсек|отрез|стрел|душ|лома|убива|меч|кинжал|копь|барьер)\w*",
+                lowered,
+            )
+        )
+        if not attack:
+            return {}
+        claimed_outcome = bool(
+            re.search(
+                r"(?iu)\b(?:поврежден|ранен|кровь|отрублен|отсечен|сломал|убит|мертв|парализован|заперт)\w*",
+                lowered,
+            )
+        )
+        return {
+            "interaction_type": "попытка физического или магического воздействия",
+            "player_action_claim": content[:1200],
+            "claimed_outcome_present": claimed_outcome,
+            "resolution_rule": (
+                "Слова игрока описывают попытку и заявленный исход, но не доказывают успех. "
+                "Странник обязан ответить сценическим действием. Без подтверждённого результата "
+                "нельзя считать попадание, отсечение, смерть или барьер свершившимся фактом."
+            ),
+        }

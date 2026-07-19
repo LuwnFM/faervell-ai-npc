@@ -169,9 +169,12 @@ class QuestObjectiveDraft(BaseModel):
 class QuestDraft(BaseModel):
     title: str
     template_id: str
+    description: str = ""
+    location_name: str | None = None
     objectives: list[QuestObjectiveDraft] = Field(min_length=1, max_length=8)
     reward_currency_id: str | None = None
     reward_amount: float = Field(default=0, ge=0)
+    reward_note: str | None = None
     repeatable: bool = False
     gm_approval_required: bool = False
     evidence: list[str] = Field(default_factory=list)

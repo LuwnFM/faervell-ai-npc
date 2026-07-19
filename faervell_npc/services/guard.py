@@ -60,11 +60,38 @@ class OutputGuard:
         if "как ии" in lowered or "языковая модель" in lowered:
             violations.append("out_of_character_ai_reference")
 
+        # The RP body must be fully Russian. The model slug is appended later by Discord
+        # and is therefore not part of this validation.
+        if re.search(r"[A-Za-z]", text):
+            violations.append("latin_characters_in_rp_body")
+
+        if self._looks_incomplete(text):
+            violations.append("incomplete_or_truncated_response")
+
         for name, pattern in self.OOC_PATTERNS.items():
             if pattern.search(text):
                 violations.append(f"out_of_character_moderation:{name}")
 
         return GuardResult(passed=not violations, violations=violations)
+
+    @staticmethod
+    def _looks_incomplete(text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return True
+        if stripped[-1] in {",", ":", ";", "—", "-", "(", "[", "{"}:
+            return True
+        # A normal RP answer must close its final sentence. This catches provider outputs
+        # such as «Странник сжимает зубы,» even when finish_reason was incorrectly "stop".
+        if stripped[-1] not in ".!?…»”\"')]}*":
+            return True
+        if stripped.count("*") % 2:
+            return True
+        if stripped.count("(") != stripped.count(")"):
+            return True
+        if stripped.count("[") != stripped.count("]"):
+            return True
+        return False
 
     @staticmethod
     def _numbers(text: str) -> set[str]:

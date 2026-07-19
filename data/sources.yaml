@@ -9,6 +9,14 @@ sources:
     crawl: true
     max_pages: 1200
     min_documents: 500
+    batch_size: 40
+    required_titles:
+      - "Королевство Ивелтин"
+    priority_titles:
+      - "FirewellRP Вики"
+      - "Королевство Ивелтин"
+      - "Хронология"
+      - "Таблицы Механик"
 
   - id: faervell_calendar_home
     title: "Текущая дата и календарь Фаервелла"

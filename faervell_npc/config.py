@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 DEFAULT_ACTOR_MODELS = [
     # This is only a preferred order, not a free-model allowlist. The live OpenRouter
     # catalogue contributes every other free text model that is not explicitly blocked.
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
     "openai/gpt-oss-120b:free",
-    "nvidia/nemotron-3-ultra-550b-a55b:free",
     "deepseek/deepseek-v4-flash",
 ]
 DEFAULT_PLANNER_MODELS = [
@@ -66,7 +66,9 @@ class Settings(BaseSettings):
     openrouter_max_completion_price_per_million: float = Field(default=0.20, ge=0.0)
     openrouter_max_request_price_usd: float = Field(default=0.0, ge=0.0)
     openrouter_planner_reasoning_effort: str = "high"
-    actor_max_tokens: int = 650
+    actor_max_tokens: int = 1000
+    openrouter_response_timeout_seconds: int = Field(default=180, ge=30, le=600)
+    actor_quality_attempts: int = Field(default=3, ge=1, le=6)
     planner_max_tokens: int = 1600
     planner_daily_budget_usd: float = 2.0
     planner_escalation_enabled: bool = True
@@ -112,6 +114,9 @@ class Settings(BaseSettings):
     knowledge_min_wiki_documents: int = Field(default=500, ge=1)
     knowledge_stale_hours: int = Field(default=24, ge=1)
     fandom_api_concurrency: int = Field(default=4, ge=1, le=12)
+    fandom_batch_size: int = Field(default=40, ge=1, le=50)
+    quest_default_reward_amount: float = Field(default=5.0, ge=0.0, le=12.0)
+    quest_default_reward_currency: str = "местных монет"
     discord_model_footer_enabled: bool = True
     discord_regeneration_limit: int = Field(default=1, ge=0, le=20)
     character_match_threshold: float = 0.22

@@ -29,7 +29,7 @@ class RuleEngine:
             errors.append("profession_mask_cannot_issue_template")
         if quest.reward_amount > self.MAX_SMALL_QUEST_REWARD and not quest.gm_approval_required:
             errors.append("reward_exceeds_small_quest_limit")
-        if not quest.evidence:
+        if not quest.evidence and not quest.gm_approval_required:
             errors.append("quest_has_no_evidence")
 
         objective_ids = {objective.id for objective in quest.objectives}

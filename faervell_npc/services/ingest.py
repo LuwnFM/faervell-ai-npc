@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 import yaml  # type: ignore[import-untyped]
@@ -135,8 +135,10 @@ class SourceIngestor:
                     metadata={"path": str(path)},
                 )
             ]
-        if kind == "url" and spec.get("crawl") and "fandom.com" in location:
-            return await self._load_fandom(spec)
+        if kind == "url" and "fandom.com" in location:
+            if spec.get("crawl"):
+                return await self._load_fandom(spec)
+            return [await self._load_fandom_page(spec)]
         if kind == "url":
             return [await self._load_url(spec)]
         raise ValueError(f"Unsupported source kind: {kind}")
@@ -161,120 +163,334 @@ class SourceIngestor:
             metadata={"content_type": response.headers.get("content-type")},
         )
 
-    async def _load_fandom(self, spec: dict[str, Any]) -> list[ImportedDocument]:
-        """Load namespace-0 pages through the stable MediaWiki API.
+    async def probe_fandom(
+        self,
+        location: str,
+        *,
+        sample_title: str = "Королевство Ивелтин",
+    ) -> dict[str, Any]:
+        """Run a small, non-destructive MediaWiki API diagnostic."""
+        api_url, _ = self._fandom_api_url(location)
+        site_response = await self.http.get(
+            api_url,
+            params={
+                "action": "query",
+                "format": "json",
+                "formatversion": 2,
+                "meta": "siteinfo",
+                "siprop": "general",
+            },
+        )
+        site_response.raise_for_status()
+        site_payload = site_response.json()
+        if site_payload.get("error"):
+            raise RuntimeError(str(site_payload["error"]))
 
-        Fandom-specific Nirvana endpoints are intentionally not used. The standard `/api.php`
-        modules are the stable contract. We enumerate pages first, then fetch parse output with
-        bounded concurrency; every failed page is recorded instead of silently disappearing.
-        """
-        parsed = urlparse(str(spec["location"]))
-        api_url, path_prefix = self._fandom_api_url(str(spec["location"]))
-        max_pages = int(spec.get("max_pages") or 1200)
-        titles: list[str] = []
-        continuation: str | None = None
-        while len(titles) < max_pages:
-            params: dict[str, Any] = {
+        pages_response = await self.http.get(
+            api_url,
+            params={
                 "action": "query",
                 "format": "json",
                 "formatversion": 2,
                 "list": "allpages",
-                "aplimit": "max",
                 "apnamespace": 0,
                 "apfilterredir": "nonredirects",
+                "aplimit": 5,
+            },
+        )
+        pages_response.raise_for_status()
+        pages_payload = pages_response.json()
+        if pages_payload.get("error"):
+            raise RuntimeError(str(pages_payload["error"]))
+        sample_spec = {
+            "id": "fandom_probe",
+            "location": location,
+            "title": sample_title,
+        }
+        sample = await self._fetch_fandom_parse(sample_spec, sample_title)
+        general = (site_payload.get("query") or {}).get("general") or {}
+        continuation = pages_payload.get("continue") or {}
+        return {
+            "api_url": api_url,
+            "site_name": general.get("sitename"),
+            "generator": general.get("generator"),
+            "article_path": general.get("articlepath"),
+            "sample_pages": [
+                str(item.get("title"))
+                for item in ((pages_payload.get("query") or {}).get("allpages") or [])
+                if item.get("title")
+            ],
+            "continuation": continuation,
+            "sample_title": sample.title,
+            "sample_revision": sample.revision,
+            "sample_text_length": len(sample.text),
+            "sample_preview": sample.text[:600],
+        }
+
+    async def _load_fandom_page(self, spec: dict[str, Any]) -> ImportedDocument:
+        title = str(spec.get("wiki_title") or self._title_from_fandom_url(str(spec["location"])))
+        return await self._fetch_fandom_parse(spec, title)
+
+    async def _load_fandom(self, spec: dict[str, Any]) -> list[ImportedDocument]:
+        """Load namespace-0 pages through batched standard MediaWiki API requests.
+
+        The previous implementation issued one expensive ``action=parse`` request per article.
+        On a 700-page wiki that was slow and fragile. This implementation enumerates and fetches
+        revision content in batches through ``generator=allpages`` and follows the complete
+        MediaWiki continuation object until the namespace is exhausted. A small set of priority
+        pages is then parsed separately so transcluded infobox/calendar values are expanded.
+        """
+        api_url, path_prefix = self._fandom_api_url(str(spec["location"]))
+        parsed = urlparse(str(spec["location"]))
+        max_pages = int(spec.get("max_pages") or 1200)
+        batch_size = min(50, int(spec.get("batch_size") or self.settings.fandom_batch_size))
+        documents: dict[str, ImportedDocument] = {}
+        continuation: dict[str, Any] = {}
+        fetched_pages = 0
+
+        while fetched_pages < max_pages:
+            params: dict[str, Any] = {
+                "action": "query",
+                "format": "json",
+                "formatversion": 2,
+                "generator": "allpages",
+                "gapnamespace": 0,
+                "gapfilterredir": "nonredirects",
+                "gaplimit": min(batch_size, max_pages - fetched_pages),
+                "prop": "revisions|info",
+                "rvprop": "ids|timestamp|content",
+                "rvslots": "main",
+                "inprop": "url",
+                "maxlag": 5,
+                **continuation,
             }
-            if continuation:
-                params["apcontinue"] = continuation
-            response = await self.http.get(api_url, params=params)
-            response.raise_for_status()
-            payload = response.json()
+            payload = await self._mediawiki_json(api_url, params)
             query = payload.get("query") or {}
-            batch = query.get("allpages") or []
-            titles.extend(str(page["title"]) for page in batch if page.get("title"))
-            continuation = (payload.get("continue") or {}).get("apcontinue")
-            if not continuation or not batch:
+            pages = query.get("pages") or []
+            if isinstance(pages, dict):
+                pages = list(pages.values())
+            if not pages:
                 break
-        titles = titles[:max_pages]
-        if not titles:
-            raise RuntimeError(f"Fandom allpages returned no titles from {api_url}")
+            for page in pages:
+                if not isinstance(page, dict) or page.get("missing"):
+                    continue
+                try:
+                    document = self._document_from_revision_page(
+                        spec=spec,
+                        page=page,
+                        parsed=parsed,
+                        path_prefix=path_prefix,
+                        api_url=api_url,
+                    )
+                    if document is not None:
+                        documents[document.source_id] = document
+                except Exception as exc:
+                    self.page_errors.append(
+                        {
+                            "id": spec.get("id"),
+                            "title": page.get("title"),
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+            fetched_pages += len(pages)
+            continuation = dict(payload.get("continue") or {})
+            print(
+                "Fandom import progress: "
+                f"source={spec.get('id')} fetched={fetched_pages} readable={len(documents)} "
+                f"continued={bool(continuation)}"
+            )
+            if not continuation:
+                break
 
-        semaphore = asyncio.Semaphore(self.settings.fandom_api_concurrency)
+        priority_titles = list(
+            dict.fromkeys(
+                [
+                    *[str(item) for item in (spec.get("priority_titles") or []) if str(item).strip()],
+                    *[str(item) for item in (spec.get("required_titles") or []) if str(item).strip()],
+                ]
+            )
+        )
+        for title in priority_titles:
+            try:
+                parsed_document = await self._fetch_fandom_parse(spec, title)
+                documents[parsed_document.source_id] = parsed_document
+            except Exception as exc:
+                self.page_errors.append(
+                    {
+                        "id": spec.get("id"),
+                        "title": title,
+                        "error": f"priority parse failed: {type(exc).__name__}: {exc}",
+                    }
+                )
 
-        async def fetch(title: str) -> ImportedDocument | None:
-            async with semaphore:
-                params: dict[str, str | int] = {
-                    "action": "parse",
-                    "format": "json",
-                    "formatversion": 2,
-                    "page": title,
-                    "prop": "text|revid|displaytitle|properties|categories",
-                    "redirects": 1,
-                    "disabletoc": 1,
-                }
-                for attempt in range(3):
-                    try:
-                        response = await self.http.get(api_url, params=params)
-                        if response.status_code in {429, 502, 503, 504} and attempt < 2:
-                            await asyncio.sleep(1.5 * (attempt + 1))
-                            continue
-                        response.raise_for_status()
-                        payload = response.json()
-                        if payload.get("error"):
-                            raise RuntimeError(str(payload["error"]))
-                        parse = payload["parse"]
-                        html = parse.get("text") or ""
-                        soup = BeautifulSoup(html, "lxml")
-                        root = soup.select_one(".mw-parser-output") or soup
-                        for element in root.select(
-                            ".mw-editsection, table.navbox, .toc, script, style, .portable-infobox .pi-navigation"
-                        ):
-                            element.decompose()
-                        sections = self._sections_from_html(root)
-                        text = "\n\n".join(body for _, body in sections).strip()
-                        if len(text) < 40:
-                            raise RuntimeError("parsed page contains too little readable text")
-                        page_id = str(parse.get("pageid") or hashlib.sha1(title.encode()).hexdigest()[:16])
-                        canonical_url = f"{parsed.scheme}://{parsed.netloc}{path_prefix}/wiki/{quote(title.replace(' ', '_'))}"
-                        return ImportedDocument(
-                            source_id=f"{spec['id']}:{page_id}",
-                            title=BeautifulSoup(str(parse.get("displaytitle") or title), "lxml").get_text(" ", strip=True),
-                            url=canonical_url,
-                            revision=str(parse.get("revid") or ""),
-                            text=text,
-                            sections=sections,
-                            metadata={
-                                "wiki_title": title,
-                                "page_id": page_id,
-                                "root_source_id": spec["id"],
-                                "api_url": api_url,
-                                "categories": [
-                                    str(item.get("*") or item.get("category") or "")
-                                    for item in (parse.get("categories") or [])
-                                    if isinstance(item, dict)
-                                ],
-                            },
-                        )
-                    except Exception as exc:
-                        if attempt < 2:
-                            await asyncio.sleep(0.75 * (attempt + 1))
-                            continue
-                        self.page_errors.append(
-                            {"id": spec.get("id"), "title": title, "error": f"{type(exc).__name__}: {exc}"}
-                        )
-                        return None
+        required = {self._normalise_title(item) for item in (spec.get("required_titles") or [])}
+        available = {
+            self._normalise_title(str(document.metadata.get("wiki_title") or document.title))
+            for document in documents.values()
+        }
+        missing_required = sorted(item for item in required if item and item not in available)
+        if missing_required:
+            raise RuntimeError(
+                "Fandom import missed required pages: " + ", ".join(missing_required)
+            )
+        if not documents:
+            raise RuntimeError(f"Fandom API returned no readable documents from {api_url}")
+        return sorted(documents.values(), key=lambda item: item.title.casefold())[:max_pages]
+
+    async def _mediawiki_json(self, api_url: str, params: dict[str, Any]) -> dict[str, Any]:
+        last_error: Exception | None = None
+        for attempt in range(4):
+            try:
+                response = await self.http.get(api_url, params=params)
+                if response.status_code in {429, 502, 503, 504}:
+                    if attempt < 3:
+                        await asyncio.sleep(1.25 * (attempt + 1))
+                        continue
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get("error"):
+                    error = payload["error"]
+                    code = str(error.get("code") or "") if isinstance(error, dict) else ""
+                    if code == "maxlag" and attempt < 3:
+                        await asyncio.sleep(1.5 * (attempt + 1))
+                        continue
+                    raise RuntimeError(str(error))
+                return payload
+            except Exception as exc:
+                last_error = exc
+                if attempt < 3:
+                    await asyncio.sleep(0.8 * (attempt + 1))
+                    continue
+        assert last_error is not None
+        raise last_error
+
+    def _document_from_revision_page(
+        self,
+        *,
+        spec: dict[str, Any],
+        page: dict[str, Any],
+        parsed: Any,
+        path_prefix: str,
+        api_url: str,
+    ) -> ImportedDocument | None:
+        title = str(page.get("title") or "").strip()
+        if not title:
             return None
+        revisions = page.get("revisions") or []
+        if not revisions:
+            return None
+        revision = revisions[0] if isinstance(revisions[0], dict) else {}
+        slots = revision.get("slots") or {}
+        main = slots.get("main") if isinstance(slots, dict) else None
+        content = ""
+        if isinstance(main, dict):
+            content = str(main.get("content") or main.get("*") or "")
+        if not content:
+            content = str(revision.get("content") or revision.get("*") or "")
+        sections = self._sections_from_wikitext(content)
+        text = "\n\n".join(body for _, body in sections).strip()
+        if len(text) < 40:
+            return None
+        page_id = str(page.get("pageid") or hashlib.sha1(title.encode()).hexdigest()[:16])
+        canonical_url = str(page.get("fullurl") or "") or (
+            f"{parsed.scheme}://{parsed.netloc}{path_prefix}/wiki/"
+            f"{quote(title.replace(' ', '_'))}"
+        )
+        return ImportedDocument(
+            source_id=f"{spec['id']}:{page_id}",
+            title=title,
+            url=canonical_url,
+            revision=str(revision.get("revid") or revision.get("parentid") or ""),
+            text=text,
+            sections=sections,
+            metadata={
+                "wiki_title": title,
+                "page_id": page_id,
+                "root_source_id": spec["id"],
+                "api_url": api_url,
+                "revision_timestamp": revision.get("timestamp"),
+                "ingest_mode": "mediawiki_revision_batch",
+            },
+        )
 
-        documents: list[ImportedDocument] = []
-        batch_size = 60
-        for start in range(0, len(titles), batch_size):
-            fetched = await asyncio.gather(*(fetch(title) for title in titles[start : start + batch_size]))
-            documents.extend(doc for doc in fetched if doc is not None)
-        return documents
+    async def _fetch_fandom_parse(
+        self,
+        spec: dict[str, Any],
+        title: str,
+    ) -> ImportedDocument:
+        api_url, path_prefix = self._fandom_api_url(str(spec["location"]))
+        parsed = urlparse(str(spec["location"]))
+        payload = await self._mediawiki_json(
+            api_url,
+            {
+                "action": "parse",
+                "format": "json",
+                "formatversion": 2,
+                "page": title,
+                "prop": "text|revid|displaytitle|properties|categories",
+                "redirects": 1,
+                "disabletoc": 1,
+                "maxlag": 5,
+            },
+        )
+        parse = payload.get("parse") or {}
+        html = str(parse.get("text") or "")
+        soup = BeautifulSoup(html, "lxml")
+        root = soup.select_one(".mw-parser-output") or soup
+        for element in root.select(
+            ".mw-editsection, table.navbox, .toc, script, style, "
+            ".portable-infobox .pi-navigation"
+        ):
+            element.decompose()
+        sections = self._sections_from_html(root)
+        text = "\n\n".join(body for _, body in sections).strip()
+        if len(text) < 40:
+            raise RuntimeError("parsed page contains too little readable text")
+        resolved_title = BeautifulSoup(
+            str(parse.get("displaytitle") or parse.get("title") or title), "lxml"
+        ).get_text(" ", strip=True)
+        page_id = str(parse.get("pageid") or hashlib.sha1(title.encode()).hexdigest()[:16])
+        canonical_url = (
+            f"{parsed.scheme}://{parsed.netloc}{path_prefix}/wiki/"
+            f"{quote(str(parse.get('title') or title).replace(' ', '_'))}"
+        )
+        return ImportedDocument(
+            source_id=f"{spec['id']}:{page_id}" if spec.get("crawl") else str(spec["id"]),
+            title=resolved_title or title,
+            url=canonical_url,
+            revision=str(parse.get("revid") or ""),
+            text=text,
+            sections=sections,
+            metadata={
+                "wiki_title": str(parse.get("title") or title),
+                "page_id": page_id,
+                "root_source_id": spec["id"],
+                "api_url": api_url,
+                "categories": [
+                    str(item.get("*") or item.get("category") or "")
+                    for item in (parse.get("categories") or [])
+                    if isinstance(item, dict)
+                ],
+                "ingest_mode": "mediawiki_parse_priority",
+            },
+        )
+
+    @staticmethod
+    def _title_from_fandom_url(location: str) -> str:
+        parsed = urlparse(location)
+        marker = "/wiki/"
+        if marker not in parsed.path:
+            raise ValueError(f"Fandom article URL has no /wiki/ title: {location}")
+        raw = parsed.path.split(marker, 1)[1]
+        return unquote(raw).replace("_", " ").strip()
+
+    @staticmethod
+    def _normalise_title(value: str) -> str:
+        return re.sub(r"\s+", " ", value.casefold().replace("ё", "е")).strip()
 
     @staticmethod
     def _fandom_api_url(location: str) -> tuple[str, str]:
         parsed = urlparse(location)
-        # Localised Fandom wikis expose MediaWiki under the language prefix, e.g. /ru/api.php.
         path_prefix = parsed.path.split("/wiki/", 1)[0].rstrip("/")
         if path_prefix == "/":
             path_prefix = ""
@@ -382,6 +598,73 @@ class SourceIngestor:
             DisclosureTier.RARE: ["QUEST", "TRUST", "GM_APPROVAL"],
             DisclosureTier.RESTRICTED: ["GM_APPROVAL"],
         }[tier]
+
+    @staticmethod
+    def _sections_from_wikitext(text: str) -> list[tuple[str, str]]:
+        """Convert revision wikitext into searchable prose without a full MediaWiki parser."""
+        if not text.strip():
+            return []
+        cleaned = re.sub(r"<!--.*?-->", " ", text, flags=re.S)
+        cleaned = re.sub(r"<ref\b[^>/]*>.*?</ref\s*>", " ", cleaned, flags=re.I | re.S)
+        cleaned = re.sub(r"<ref\b[^>]*/\s*>", " ", cleaned, flags=re.I)
+        cleaned = re.sub(r"\[\[(?:Файл|File|Изображение|Image|Категория|Category):[^\]]+\]\]", " ", cleaned, flags=re.I)
+
+        infobox_lines: list[str] = []
+        for raw_line in cleaned.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("|") or "=" not in line:
+                continue
+            key, value = line[1:].split("=", 1)
+            key = re.sub(r"[_\s]+", " ", key).strip()
+            value = value.strip()
+            if not key or not value or len(key) > 80:
+                continue
+            value = re.sub(r"\{\{[^{}]*\}\}", " ", value)
+            value = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", value)
+            value = re.sub(r"\[\[([^\]]+)\]\]", r"\1", value)
+            value = BeautifulSoup(value, "lxml").get_text(" ", strip=True)
+            value = re.sub(r"\s+", " ", value).strip(" |")
+            if value and value not in {"-", "—", "нет"}:
+                infobox_lines.append(f"{key}: {value}")
+
+        cleaned = re.sub(r"\[\[([^\]|]+)\|([^\]]+)\]\]", r"\2", cleaned)
+        cleaned = re.sub(r"\[\[([^\]]+)\]\]", r"\1", cleaned)
+        cleaned = re.sub(r"\[(?:https?://\S+)\s+([^\]]+)\]", r"\1", cleaned)
+        cleaned = re.sub(r"https?://\S+", " ", cleaned)
+        cleaned = re.sub(r"\{\{[^{}]*\}\}", " ", cleaned)
+        cleaned = re.sub(r"\{\{.*?\}\}", " ", cleaned, flags=re.S)
+        cleaned = cleaned.replace("{|", "\n").replace("|}", "\n")
+        cleaned = re.sub(r"^\s*[|!]\s*", "", cleaned, flags=re.M)
+        cleaned = re.sub(r"\|\|+|!!+", " | ", cleaned)
+        cleaned = re.sub(r"'{2,5}", "", cleaned)
+        cleaned = BeautifulSoup(cleaned, "lxml").get_text("\n", strip=True)
+
+        sections: list[tuple[str, str]] = []
+        if infobox_lines:
+            unique = list(dict.fromkeys(infobox_lines))
+            sections.append(("Карточка статьи", "\n".join(unique)))
+
+        heading = "Введение"
+        buffer: list[str] = []
+        for raw_line in cleaned.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line:
+                continue
+            heading_match = re.match(r"^={2,6}\s*(.*?)\s*={2,6}$", line)
+            if heading_match:
+                if buffer:
+                    sections.append((heading, "\n".join(buffer).strip()))
+                    buffer = []
+                heading = heading_match.group(1).strip() or "Раздел"
+                continue
+            if line.startswith(("__", "{{", "}}")):
+                continue
+            line = re.sub(r"^[*#:;]+\s*", "", line)
+            if len(line) >= 2:
+                buffer.append(line)
+        if buffer:
+            sections.append((heading, "\n".join(buffer).strip()))
+        return [(title, body) for title, body in sections if len(body) >= 20]
 
     @staticmethod
     def _sections_from_plaintext(text: str) -> list[tuple[str, str]]:

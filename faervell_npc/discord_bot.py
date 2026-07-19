@@ -20,6 +20,7 @@ from faervell_npc.models import (
     GuildRuntimeSettings,
     KnowledgeGap,
     Quest,
+    QuestObjective,
     ResponseBundle,
     ResponseFeedback,
     SceneConfig,
@@ -744,9 +745,13 @@ class StrangerCommands(commands.Cog):
 
     @stranger.command(
         name="knowledge_status",
-        description="Проверить полноту и свежесть локальной базы знаний",
+        description="Проверить локальную базу знаний и Fandom API",
     )
-    async def knowledge_status(self, interaction: discord.Interaction) -> None:
+    async def knowledge_status(
+        self,
+        interaction: discord.Interaction,
+        probe_api: bool = False,
+    ) -> None:
         if not await self._require_gm(interaction):
             return
         async with SessionLocal() as session:
@@ -761,7 +766,30 @@ class StrangerCommands(commands.Cog):
             text += "\nПервые ошибки: " + "; ".join(
                 str(item.get("error") or item)[:140] for item in info.latest_run_errors[:3]
             )
-        await interaction.response.send_message(text, ephemeral=True)
+        if not probe_api:
+            await interaction.response.send_message(text, ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ingestor = SourceIngestor()
+        try:
+            report = await ingestor.probe_fandom(
+                "https://faervellrp.fandom.com/ru/wiki/FirewellRP_%D0%92%D0%B8%D0%BA%D0%B8",
+                sample_title="Королевство Ивелтин",
+            )
+            continuation = report.get("continuation") or {}
+            preview = str(report.get("sample_preview") or "").replace("`", "'")[:500]
+            text += (
+                f"\n\nAPI Fandom: **доступен**, сайт: **{report.get('site_name') or '—'}**."
+                f"\nПродолжение списка страниц: **{'есть' if continuation else 'нет'}**."
+                f"\nКонтрольная статья: **{report.get('sample_title') or '—'}**, "
+                f"текста: **{report.get('sample_text_length') or 0}** символов."
+                f"\n```text\n{preview}\n```"
+            )
+        except Exception as exc:
+            text += f"\n\nAPI Fandom: **ошибка** — `{type(exc).__name__}: {str(exc)[:700]}`"
+        finally:
+            await ingestor.close()
+        await interaction.followup.send(text[:1950], ephemeral=True)
 
     @stranger.command(name="status", description="Показать состояние сцены и сервисов")
     async def status(self, interaction: discord.Interaction) -> None:
@@ -1432,11 +1460,29 @@ class FaervellBot(commands.Bot):
             review.status = "APPROVED" if approved else "REJECTED"
             review.decided_by_discord_user_id = str(interaction.user.id)
             review.decided_at = datetime.now(UTC)
+            quest_record: Quest | None = None
+            quest_objectives: list[QuestObjective] = []
             if review.related_quest_id:
-                quest = await session.get(Quest, review.related_quest_id)
-                if quest is not None:
-                    quest.status = "ACTIVE" if approved else "REJECTED"
+                quest_record = await session.get(Quest, review.related_quest_id)
+                if quest_record is not None:
+                    quest_record.status = "ACTIVE" if approved else "REJECTED"
+                    quest_objectives = list(
+                        (
+                            await session.execute(
+                                select(QuestObjective).where(
+                                    QuestObjective.quest_id == quest_record.id
+                                )
+                            )
+                        ).scalars()
+                    )
             source_channel_id = review.channel_id
+            quest_payload = dict((review.payload or {}).get("quest") or {})
+            rp_decision_text = self._quest_decision_text(
+                approved=approved,
+                quest=quest_record,
+                objectives=quest_objectives,
+                fallback_payload=quest_payload,
+            )
             await session.commit()
         await interaction.response.edit_message(
             content=(interaction.message.content if interaction.message else "")
@@ -1449,15 +1495,57 @@ class FaervellBot(commands.Bot):
             )
             if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await channel.send(
-                    "*Странник ненадолго возвращается к разговору.*\n"
-                    + (
-                        "— Условия прояснились. Это дело можно принять."
-                        if approved
-                        else "— Это поручение пока не состоится. Поищем другое дело."
-                    )
+                    "*Странник ненадолго возвращается к разговору.*\n\n" + rp_decision_text
                 )
         except discord.HTTPException:
             pass
+
+    @staticmethod
+    def _quest_decision_text(
+        *,
+        approved: bool,
+        quest: Quest | None,
+        objectives: list[QuestObjective],
+        fallback_payload: dict[str, object],
+    ) -> str:
+        if not approved:
+            return "— Это поручение пока не состоится. Я поищу другое дело."
+        title = quest.title if quest is not None else str(fallback_payload.get("title") or "Поручение")
+        constraints = dict(quest.constraints or {}) if quest is not None else fallback_payload
+        description = str(constraints.get("description") or fallback_payload.get("description") or "").strip()
+        location = str(constraints.get("location_name") or fallback_payload.get("location_name") or "").strip()
+        reward = dict(quest.reward or {}) if quest is not None else {
+            "amount": fallback_payload.get("reward_amount"),
+            "currency_id": fallback_payload.get("reward_currency_id"),
+        }
+        lines = [f"— Условия ясны. Дело называется «{title}»."]
+        if description:
+            lines.append(description)
+        if location:
+            lines.append(f"Место выполнения: {location}.")
+        if objectives:
+            readable = {
+                "DELIVER": "доставить пакет и получить подтверждение передачи",
+                "FIND_LOCATION": "проверить путь и вернуться с описанием дороги",
+                "INVESTIGATE": "осмотреть место и сообщить результаты",
+                "ESCORT": "сопроводить путника до указанного места",
+            }
+            for objective in objectives[:3]:
+                lines.append(
+                    "Задача: " + readable.get(objective.objective_type, "выполнить поручение") + "."
+                )
+        amount = reward.get("amount")
+        if isinstance(amount, (int, float, str)) and str(amount).strip():
+            try:
+                amount_text = f"{float(amount):g}"
+            except ValueError:
+                amount_text = str(amount)
+            lines.append(
+                f"Плата после выполнения — {amount_text} "
+                f"{reward.get('currency_id') or 'местных монет'}."
+            )
+        lines.append("— Можешь отправляться, когда будешь готова.")
+        return "\n".join(lines)
 
     async def _post_gm_review(self, review_id: str) -> tuple[bool, str]:
         async with SessionLocal() as session:
@@ -1484,13 +1572,28 @@ class FaervellBot(commands.Bot):
                 print(f"GM review pending without channel: id={review.id} reason={review.reason}")
                 return False, "служебный канал не назначен"
             payload = dict(review.payload or {})
+            quest_payload = dict(payload.get("quest") or {})
+            quest_lines: list[str] = []
+            if quest_payload:
+                quest_lines.append(f"Предлагаемое дело: **{quest_payload.get('title') or 'без названия'}**")
+                if quest_payload.get("description"):
+                    quest_lines.append(f"Описание: {quest_payload['description']}")
+                if quest_payload.get("location_name"):
+                    quest_lines.append(f"Место: {quest_payload['location_name']}")
+                if quest_payload.get("reward_amount"):
+                    quest_lines.append(
+                        "Предлагаемая плата: "
+                        f"{quest_payload['reward_amount']} "
+                        f"{quest_payload.get('reward_currency_id') or 'местных монет'}"
+                    )
             content = (
                 f"**Новая заявка Странника: {review.request_type}**\n"
                 f"ID: `{review.id}`\n"
                 f"Причина: {review.reason}\n"
                 f"Игрок: {f'<@{review.player_discord_user_id}>' if review.player_discord_user_id else 'не определён'}\n"
                 f"Исходный канал: <#{review.channel_id}>\n"
-                f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)[:1200]}\n```"
+                + ("\n".join(quest_lines) + "\n" if quest_lines else "")
+                + f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)[:1200]}\n```"
             )
         try:
             channel_id = int(configured)
@@ -2097,11 +2200,14 @@ class FaervellBot(commands.Bot):
 
     @staticmethod
     def _with_sources(text: str, citations: list[dict[str, str | None]]) -> str:
+        # Raw links and English source identifiers break RP immersion. Keep only readable
+        # Cyrillic titles; full URLs remain available in the audit log and feedback bundle.
         unique: list[str] = []
         for citation in citations:
-            title = citation.get("title") or citation.get("source_id") or "источник"
-            url = citation.get("url")
-            rendered = f"[{title}](<{url}>)" if url else str(title)
+            title = str(citation.get("title") or "").strip()
+            if not title or re.search(r"[A-Za-z]", title):
+                continue
+            rendered = f"«{title}»"
             if rendered not in unique:
                 unique.append(rendered)
         if not unique:

@@ -183,7 +183,12 @@ class ToolExecutor:
                         "currency_id": quest.reward_currency_id,
                         "amount": quest.reward_amount,
                     },
-                    constraints={"repeatable": quest.repeatable},
+                    constraints={
+                        "repeatable": quest.repeatable,
+                        "description": quest.description,
+                        "location_name": quest.location_name,
+                        "reward_note": quest.reward_note,
+                    },
                     evidence=quest.evidence,
                 )
                 session.add(record)
@@ -307,9 +312,13 @@ class ToolExecutor:
         missing = set(quest.evidence) - set(evidence_pool)
         if missing:
             errors.append("unretrieved_evidence:" + ",".join(sorted(missing)))
-        if quest.reward_amount > 0 and not any(
-            evidence_pool.get(item, {}).get("corpus") == Corpus.MECHANICS.value
-            for item in quest.evidence
+        if (
+            quest.reward_amount > 0
+            and not quest.gm_approval_required
+            and not any(
+                evidence_pool.get(item, {}).get("corpus") == Corpus.MECHANICS.value
+                for item in quest.evidence
+            )
         ):
             errors.append("reward_has_no_mechanics_evidence")
         evidence_text = " ".join(json.dumps(evidence_pool.get(item, {}), ensure_ascii=False) for item in quest.evidence).casefold()

@@ -123,21 +123,38 @@ class StrangerOrchestrator:
         else:
             packet = self._chat_packet(context)
 
-        response, actor_model, selection_reason = await self.actor.render(session, packet, context)
-        guard_result = self.guard.validate(response, packet)
-        if not guard_result.passed:
-            response, actor_model_retry, retry_reason = await self.actor.render(
+        excluded_models: set[str] = set()
+        response = ""
+        actor_model: str | None = None
+        selection_reason: str | None = None
+        guard_result = self.guard.validate("", packet)
+        for attempt in range(self.actor.settings.actor_quality_attempts):
+            correction = None
+            if attempt:
+                correction = (
+                    "Предыдущий вариант был отброшен автоматической проверкой: "
+                    + "; ".join(guard_result.violations)
+                    + ". Напиши законченный ответ только на русском языке и не повторяй прежний вариант."
+                )
+            response, used_model, used_reason = await self.actor.render(
                 session,
                 packet,
                 context,
-                correction="; ".join(guard_result.violations),
+                correction=correction,
+                exclude_models=excluded_models or None,
             )
-            actor_model = actor_model_retry or actor_model
-            selection_reason = retry_reason or selection_reason
+            if used_model:
+                excluded_models.add(used_model)
+                actor_model = used_model
+            selection_reason = used_reason or selection_reason
             guard_result = self.guard.validate(response, packet)
-            if not guard_result.passed:
-                response = self.actor.fallback(packet, context)
-                guard_result = self.guard.validate(response, packet)
+            if guard_result.passed:
+                break
+        if not guard_result.passed:
+            response = self.actor.fallback(packet, context)
+            actor_model = None
+            selection_reason = "local_template_actor_quality_guard_failed"
+            guard_result = self.guard.validate(response, packet)
 
         relationship = await self.memory.get_or_create_relationship(session, character_id)
         await self.memory.register_interaction(session, relationship)
@@ -475,20 +492,32 @@ class StrangerOrchestrator:
         excluded_models: set[str],
     ) -> tuple[str, str | None, str | None]:
         """Regenerate the literary surface only; facts and state remain unchanged."""
-        response, model, reason = await self.actor.render(
-            session,
-            packet,
-            context,
-            correction="Сделай новый вариант заметно иначе, без повторения прежних действий и формулировок.",
-            free_only=True,
-            exclude_models=excluded_models,
-        )
-        guard = self.guard.validate(response, packet)
-        if not guard.passed:
-            response = self.actor.fallback(packet, context)
-            model = None
-            reason = "local_template_regeneration_guard_failed"
-        return response, model, reason
+        excluded = set(excluded_models)
+        response = ""
+        model: str | None = None
+        reason: str | None = None
+        guard = self.guard.validate("", packet)
+        for _attempt in range(self.actor.settings.actor_quality_attempts):
+            response, used_model, used_reason = await self.actor.render(
+                session,
+                packet,
+                context,
+                correction=(
+                    "Сделай новый вариант заметно иначе, без повторения прежних действий и "
+                    "формулировок. Ответ должен быть завершённым и полностью русскоязычным."
+                ),
+                free_only=True,
+                exclude_models=excluded,
+            )
+            if used_model:
+                excluded.add(used_model)
+                model = used_model
+            reason = used_reason or reason
+            guard = self.guard.validate(response, packet)
+            if guard.passed:
+                return response, model, reason
+        response = self.actor.fallback(packet, context)
+        return response, None, "local_template_regeneration_guard_failed"
 
     @staticmethod
     def _gm_review_id(packet: ActorPacket) -> str | None:

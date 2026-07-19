@@ -42,6 +42,8 @@ class LLMResult:
     completion_tokens: int = 0
     cost_usd: float = 0.0
     selection_reason: str = ""
+    finish_reason: str = ""
+    native_finish_reason: str = ""
 
 
 class OpenRouterClient:
@@ -49,7 +51,9 @@ class OpenRouterClient:
         self.settings = get_settings()
         self.client = httpx.AsyncClient(
             base_url=self.settings.openrouter_base_url,
-            timeout=httpx.Timeout(90.0, connect=15.0),
+            timeout=httpx.Timeout(
+                float(self.settings.openrouter_response_timeout_seconds), connect=20.0
+            ),
         )
         self._catalog: dict[str, CatalogModel] = {}
         self._catalog_loaded_at: datetime | None = None
@@ -379,8 +383,18 @@ class OpenRouterClient:
             payload = response.json()
             if payload.get("error"):
                 raise ValueError(f"OpenRouter error payload: {payload['error']}")
-            message = payload["choices"][0]["message"]
+            choice = payload["choices"][0]
+            message = choice["message"]
             content = self._content_text(message.get("content"))
+            finish_reason = str(choice.get("finish_reason") or "")
+            native_finish_reason = str(choice.get("native_finish_reason") or "")
+            if finish_reason and finish_reason != "stop":
+                raise ValueError(
+                    "incomplete completion: "
+                    f"finish_reason={finish_reason} native_finish_reason={native_finish_reason or '-'}"
+                )
+            if not content.strip():
+                raise ValueError("empty completion content")
             usage = payload.get("usage") or {}
             model_name = str(payload.get("model") or candidate.id)
             parsed: T | None = None
@@ -393,6 +407,8 @@ class OpenRouterClient:
                 completion_tokens=int(usage.get("completion_tokens") or 0),
                 cost_usd=float(usage.get("cost") or 0.0),
                 selection_reason=f"{selection_reason}; candidate={candidate_index + 1}/{candidate_count}; schema={schema_mode}",
+                finish_reason=finish_reason,
+                native_finish_reason=native_finish_reason,
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
             session.add(
@@ -414,11 +430,16 @@ class OpenRouterClient:
                         "schema_mode": schema_mode,
                         "body_keys": sorted(body),
                     },
-                    response_metadata={"id": payload.get("id"), "provider": payload.get("provider")},
+                    response_metadata={
+                        "id": payload.get("id"),
+                        "provider": payload.get("provider"),
+                        "finish_reason": finish_reason,
+                        "native_finish_reason": native_finish_reason,
+                    },
                 )
             )
             logger.info(
-                "model_call success kind=%s selected=%s free=%s candidate=%d/%d prompt_tokens=%d completion_tokens=%d cost_usd=%.8f latency_ms=%d",
+                "model_call success kind=%s selected=%s free=%s candidate=%d/%d prompt_tokens=%d completion_tokens=%d cost_usd=%.8f latency_ms=%d finish=%s",
                 kind,
                 model_name,
                 candidate.free,
@@ -428,6 +449,7 @@ class OpenRouterClient:
                 result.completion_tokens,
                 result.cost_usd,
                 latency_ms,
+                result.finish_reason or "unknown",
             )
             return result, parsed
         except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError, ValidationError) as exc:
