@@ -24,6 +24,10 @@ if [[ -f scripts/migrate-v0.7.4.sh ]]; then
   bash scripts/migrate-v0.7.4.sh "$APP_DIR/.env"
 fi
 
+if [[ -f scripts/migrate-v0.8.0.sh ]]; then
+  bash scripts/migrate-v0.8.0.sh "$APP_DIR/.env"
+fi
+
 docker compose config >/dev/null
 docker compose up -d --build
 

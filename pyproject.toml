@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "faervell-ai-npc"
-version = "0.7.4"
+version = "0.8.0"
 description = "Discord AI-NPC Stranger for Faervell RP"
 readme = "README.md"
 requires-python = ">=3.12"

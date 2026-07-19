@@ -111,6 +111,7 @@ class GMReviewView(discord.ui.View):
         self.add_item(reject)
 
 
+# FAERVELL_V080:discord
 class StrangerCommands(commands.Cog):
     stranger = app_commands.Group(name="stranger", description="Управление ИИ-NPC Странником")
 
@@ -467,7 +468,7 @@ class StrangerCommands(commands.Cog):
 
     @stranger.command(
         name="locations_sync",
-        description="Синхронизировать RP-каналы из разрешённых категорий",
+        description="Синхронизировать локации, описания и новости мира",
     )
     async def locations_sync(self, interaction: discord.Interaction) -> None:
         if not await self._require_gm(interaction):
@@ -478,13 +479,56 @@ class StrangerCommands(commands.Cog):
             )
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        report = await self.bot.sync_location_scenes(interaction.guild_id)
-        await interaction.followup.send(
-            "RP-каналы синхронизированы: "
-            f"новых **{report['registered']}**, обновлено **{report['updated']}**, "
-            f"пропущено без прав **{report['skipped_permissions']}**.",
-            ephemeral=True,
+        from faervell_npc.services.discord_knowledge import sync_discord_knowledge
+
+        last_progress = 0.0
+
+        async def progress(state: dict[str, object]) -> None:
+            nonlocal last_progress
+            now = asyncio.get_running_loop().time()
+            if state.get("stage") != "done" and now - last_progress < 7.0:
+                return
+            last_progress = now
+            current = str(state.get("current") or "—")[:120]
+            text = (
+                "Синхронизация локаций и знаний…\n"
+                f"Этап: **{state.get('stage') or '—'}**, объект: **{current}**.\n"
+                f"Контейнеров: **{state.get('containers_seen', 0)}**, "
+                f"веток: **{state.get('threads_seen', 0)}**, "
+                f"документов: **{state.get('documents', 0)}**, "
+                f"фрагментов: **{state.get('chunks', 0)}**."
+            )
+            try:
+                await interaction.edit_original_response(content=text[:1900])
+            except discord.HTTPException:
+                pass
+
+        report = await sync_discord_knowledge(
+            self.bot, interaction.guild_id, progress=progress
         )
+        posted, failed, reasons = await self.bot._retry_pending_gm_reviews(
+            guild_id=str(interaction.guild_id), limit=100
+        )
+        errors = list(report.get("errors") or [])
+        suffix = ""
+        if errors:
+            suffix += "\nПервые ошибки: " + "; ".join(str(item)[:180] for item in errors[:3])
+        if reasons:
+            suffix += "\nДоставка ГМ: " + "; ".join(reasons[:3])
+        result = (
+            "Синхронизация завершена.\n"
+            f"Сцен создано: **{report.get('scenes_created', 0)}**, "
+            f"обновлено: **{report.get('scenes_updated', 0)}**.\n"
+            f"Форумов/каналов: **{report.get('containers_seen', 0)}**, "
+            f"веток/постов: **{report.get('threads_seen', 0)}**.\n"
+            f"Документов знаний: **{report.get('documents', 0)}**, "
+            f"фрагментов: **{report.get('chunks', 0)}**.\n"
+            f"Новостей мира: **{report.get('news_documents', 0)}**, "
+            f"отправлено ГМ-заявок: **{posted}**, не отправлено: **{failed}**.\n"
+            f"Тайм-аутов: **{report.get('timed_out', 0)}**."
+            + suffix
+        )
+        await interaction.edit_original_response(content=result[:1950])
 
     @stranger.command(
         name="permissions",
@@ -877,21 +921,214 @@ class StrangerCommands(commands.Cog):
             await ingestor.close()
 
     @stranger.command(
-        name="behavior_scan", description="Экспортировать важные случаи для ручного патча"
+        name="behavior_scan",
+        description="Диагностика поведения, памяти и пробелов знаний",
     )
-    async def behavior_scan(self, interaction: discord.Interaction, days: int = 30) -> None:
+    @app_commands.describe(
+        action="scan, memory_list, memory_clear, gaps_list или gaps_clear",
+        days="Период отчёта scan",
+        character_id="ID персонажа для memory_clear",
+        contains="Фильтр текста для gaps_clear",
+        clear_binding="При memory_clear также убрать привязки персонажа",
+    )
+    async def behavior_scan(
+        self,
+        interaction: discord.Interaction,
+        action: str = "scan",
+        days: int = 30,
+        character_id: str | None = None,
+        contains: str | None = None,
+        clear_binding: bool = False,
+    ) -> None:
         if not await self._require_gm(interaction):
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        async with SessionLocal() as session:
-            report = await self.behavior.scan(session, max(1, min(days, 365)))
-        output = Path("data/exports") / f"behavior-scan-{datetime.now(UTC):%Y%m%d-%H%M%S}.json"
-        self.behavior.export_scan(report, output)
-        await interaction.followup.send(
-            "Отчёт собран. Он ничего не применяет автоматически.",
-            file=discord.File(output),
-            ephemeral=True,
+        action = action.casefold().strip()
+        allowed = {"scan", "memory_list", "memory_clear", "gaps_list", "gaps_clear"}
+        if action not in allowed:
+            await interaction.response.send_message(
+                "action: `scan`, `memory_list`, `memory_clear`, `gaps_list` или `gaps_clear`.",
+                ephemeral=True,
+            )
+            return
+
+        if action == "scan":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            async with SessionLocal() as session:
+                report = await self.behavior.scan(session, max(1, min(days, 365)))
+                await session.commit()
+            posted = failed = 0
+            reasons: list[str] = []
+            if interaction.guild_id is not None:
+                posted, failed, reasons = await self.bot._retry_pending_gm_reviews(
+                    guild_id=str(interaction.guild_id), limit=100
+                )
+            output = Path("data/exports") / f"behavior-scan-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.json"
+            self.behavior.export_scan(report, output)
+            note = (
+                "Нормализованный отчёт собран. "
+                f"Создано старых ГМ-заявок: **{report.get('gm_reviews_backfilled', 0)}**, "
+                f"доставлено: **{posted}**, не доставлено: **{failed}**. "
+                f"Автоматически закрыто уже заполненных пробелов: "
+                f"**{report.get('auto_resolved_gaps', 0)}**."
+            )
+            if reasons:
+                note += "\nДоставка: " + "; ".join(reasons[:3])
+            await interaction.followup.send(
+                note[:1800],
+                file=discord.File(output),
+                ephemeral=True,
+            )
+            return
+
+        from sqlalchemy import delete
+        from faervell_npc.models import (
+            RelationshipState,
+            SceneCharacterIdentity,
+            TravelerMemory,
         )
+
+        async with SessionLocal() as session:
+            if action == "memory_list":
+                memories = list(
+                    (
+                        await session.execute(
+                            select(TravelerMemory)
+                            .order_by(TravelerMemory.first_seen_at.desc())
+                            .limit(2000)
+                        )
+                    ).scalars()
+                )
+                bindings = list((await session.execute(select(CharacterBinding))).scalars())
+                names: dict[str, str] = {}
+                for binding in bindings:
+                    if binding.active or binding.character_id not in names:
+                        names[binding.character_id] = binding.character_name
+                grouped: dict[str, dict[str, object]] = {}
+                for memory in memories:
+                    item = grouped.setdefault(memory.character_id, {"count": 0, "latest": ""})
+                    item["count"] = int(item["count"]) + 1
+                    if not item["latest"]:
+                        item["latest"] = memory.statement[:120]
+                if not grouped:
+                    text = "У Странника пока нет производной памяти о персонажах."
+                else:
+                    lines = ["**Персонажи в памяти Странника:**"]
+                    ordered = sorted(
+                        grouped.items(), key=lambda pair: int(pair[1]["count"]), reverse=True
+                    )
+                    for cid, info in ordered[:35]:
+                        name = names.get(cid, "неизвестное имя")
+                        lines.append(
+                            f"• **{name}** — `{cid}` — записей: **{info['count']}**; "
+                            f"последнее: {info['latest']}"
+                        )
+                    text = "\n".join(lines)
+                await interaction.response.send_message(text[:1950], ephemeral=True)
+                return
+
+            if action == "memory_clear":
+                if not character_id:
+                    await interaction.response.send_message(
+                        "Для `memory_clear` укажите character_id.", ephemeral=True
+                    )
+                    return
+                memory_result = await session.execute(
+                    delete(TravelerMemory).where(TravelerMemory.character_id == character_id)
+                )
+                await session.execute(
+                    delete(RelationshipState).where(RelationshipState.character_id == character_id)
+                )
+                bindings_changed = 0
+                identities_changed = 0
+                if clear_binding:
+                    bindings = list(
+                        (
+                            await session.execute(
+                                select(CharacterBinding).where(
+                                    CharacterBinding.character_id == character_id,
+                                    CharacterBinding.active.is_(True),
+                                )
+                            )
+                        ).scalars()
+                    )
+                    for binding in bindings:
+                        binding.active = False
+                    identities = list(
+                        (
+                            await session.execute(
+                                select(SceneCharacterIdentity).where(
+                                    SceneCharacterIdentity.character_id == character_id,
+                                    SceneCharacterIdentity.active.is_(True),
+                                )
+                            )
+                        ).scalars()
+                    )
+                    for identity in identities:
+                        identity.active = False
+                    bindings_changed = len(bindings)
+                    identities_changed = len(identities)
+                await session.commit()
+                removed = max(0, int(memory_result.rowcount or 0))
+                await interaction.response.send_message(
+                    f"Очищена производная память `{character_id}`: **{removed}** записей. "
+                    f"Привязок отключено: **{bindings_changed}**, сценических личностей: "
+                    f"**{identities_changed}**. Сырой архив и канон не удалялись.",
+                    ephemeral=True,
+                )
+                return
+
+            if action == "gaps_list":
+                report = await self.behavior.scan(session, max(1, min(days, 365)))
+                gaps = list(report.get("pending_knowledge_gaps") or [])
+                if not gaps:
+                    text = "Нормализованных нерешённых пробелов знаний нет."
+                else:
+                    lines = ["**Нерешённые пробелы знаний:**"]
+                    for item in gaps[:35]:
+                        lines.append(
+                            f"• **{item.get('count', 1)}×** {str(item.get('question') or '')[:220]}"
+                        )
+                    text = "\n".join(lines)
+                await interaction.response.send_message(text[:1950], ephemeral=True)
+                return
+
+            pending = list(
+                (
+                    await session.execute(
+                        select(KnowledgeGap).where(KnowledgeGap.status == "PENDING")
+                    )
+                ).scalars()
+            )
+            needle = (contains or "").casefold().strip()
+            targets = [gap for gap in pending if not needle or needle in gap.question.casefold()]
+            target_ids = {gap.id for gap in targets}
+            for gap in targets:
+                gap.status = "CLEARED"
+            reviews = list(
+                (
+                    await session.execute(
+                        select(GMReviewRequest).where(
+                            GMReviewRequest.request_type == "KNOWLEDGE_GAP",
+                            GMReviewRequest.status == "PENDING",
+                        )
+                    )
+                ).scalars()
+            )
+            closed_reviews = 0
+            for review in reviews:
+                gap_id = str((review.payload or {}).get("knowledge_gap_id") or "")
+                if gap_id in target_ids:
+                    review.status = "REJECTED"
+                    review.decision_note = "Пробел очищен командой ГМ"
+                    review.decided_by_discord_user_id = str(interaction.user.id)
+                    review.decided_at = datetime.now(timezone.utc)
+                    closed_reviews += 1
+            await session.commit()
+            await interaction.response.send_message(
+                f"Очищено пробелов: **{len(targets)}**, закрыто ГМ-заявок: "
+                f"**{closed_reviews}**. Канон и архив сообщений не изменялись.",
+                ephemeral=True,
+            )
 
     @staticmethod
     def _slug(text: str) -> str:

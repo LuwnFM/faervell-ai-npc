@@ -1,21 +1,31 @@
 masks:
   traveler:
+    can_trade: true
+    quest_capability: any
     display_name: "странник"
     vocabulary: ["дорога", "след", "путь", "слух"]
-    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION, COLLECT, CRAFT, REPAIR, ESCORT]
   herbalist:
+    can_trade: true
+    quest_capability: any
     display_name: "травник"
     vocabulary: ["стебель", "корень", "настой", "сушить"]
-    quest_templates: [COLLECT, DELIVER_ITEM, CRAFT]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION, COLLECT, CRAFT, REPAIR, ESCORT]
   artisan:
+    can_trade: true
+    quest_capability: any
     display_name: "ремесленник"
     vocabulary: ["заготовка", "инструмент", "шов", "сплав"]
-    quest_templates: [COLLECT, CRAFT, REPAIR]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION, COLLECT, CRAFT, REPAIR, ESCORT]
   merchant:
+    can_trade: true
+    quest_capability: any
     display_name: "торговец"
     vocabulary: ["цена", "обмен", "товар", "мерка"]
-    quest_templates: [DELIVER_ITEM, COLLECT]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION, COLLECT, CRAFT, REPAIR, ESCORT]
   guide:
+    can_trade: true
+    quest_capability: any
     display_name: "проводник"
     vocabulary: ["перевал", "тропа", "брод", "ориентир"]
-    quest_templates: [FIND_LOCATION, ESCORT, INVESTIGATE]
+    quest_templates: [DELIVER_ITEM, INVESTIGATE, FIND_LOCATION, COLLECT, CRAFT, REPAIR, ESCORT]

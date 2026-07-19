@@ -20,6 +20,7 @@ from faervell_npc.services.presence import PresenceService
 from faervell_npc.services.router import IntentRouter
 from faervell_npc.services.rules import RuleEngine
 from faervell_npc.services.tools import ToolExecutor
+from faervell_npc.services.v080_runtime import install_v080_runtime
 
 
 @dataclass(slots=True)
@@ -64,6 +65,16 @@ def build_runtime() -> Runtime:
         decision_cache=decision_cache,
         actor=actor,
         guard=guard,
+    )
+    # FAERVELL_V080:runtime
+    install_v080_runtime(
+        planner=planner,
+        orchestrator=orchestrator,
+        actor=actor,
+        guard=guard,
+        rules=rules,
+        characters=characters,
+        local_planner=local_planner,
     )
     return Runtime(
         llm=llm,

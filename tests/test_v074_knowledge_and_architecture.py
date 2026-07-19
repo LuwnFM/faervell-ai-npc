@@ -56,4 +56,4 @@ def test_docker_image_contains_architecture_source() -> None:
     assert "COPY docs ./docs" in dockerfile
     architecture = root / "docs" / "architecture-source.md"
     assert architecture.exists()
-    assert "Версия системы:** `0.7.4`" in architecture.read_text(encoding="utf-8")
+    assert "Версия системы:** `0.8.0`" in architecture.read_text(encoding="utf-8")
