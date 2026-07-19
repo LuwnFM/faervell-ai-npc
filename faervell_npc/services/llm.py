@@ -70,20 +70,20 @@ class OpenRouterClient:
                 "No model remains after applying the explicit allowlist/blocklist policy"
             )
 
+        max_price: dict[str, float] = {
+            "prompt": self.settings.openrouter_max_prompt_price_per_million,
+            "completion": self.settings.openrouter_max_completion_price_per_million,
+        }
+        # OpenRouter's fixed per-request price ceiling is optional. Sending 0.0 is not
+        # needed and can be rejected by request validators, so omit it unless enabled.
+        if self.settings.openrouter_max_request_price_usd > 0:
+            max_price["request"] = self.settings.openrouter_max_request_price_usd
+
         provider_policy: dict[str, Any] = {
             "allow_fallbacks": True,
             "sort": "price",
-            "max_price": {
-                "prompt": self.settings.openrouter_max_prompt_price_per_million,
-                "completion": self.settings.openrouter_max_completion_price_per_million,
-                "request": self.settings.openrouter_max_request_price_usd,
-            },
+            "max_price": max_price,
         }
-        reasoning_policy: dict[str, Any] = {"exclude": True}
-        if kind.upper() == "PLANNER":
-            effort = self.settings.openrouter_planner_reasoning_effort
-            if effort != "none":
-                reasoning_policy["effort"] = effort
 
         body: dict[str, Any] = {
             "models": models,
@@ -91,8 +91,15 @@ class OpenRouterClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "provider": provider_policy,
-            "reasoning": reasoning_policy,
         }
+        # Actor calls do not need a reasoning control parameter. Planner call kinds use
+        # names such as PLANNER_PLAN, so match the prefix rather than only PLANNER.
+        if kind.upper().startswith("PLANNER"):
+            reasoning_policy: dict[str, Any] = {"exclude": True}
+            effort = self.settings.openrouter_planner_reasoning_effort
+            if effort != "none":
+                reasoning_policy["effort"] = effort
+            body["reasoning"] = reasoning_policy
         if schema_model is not None:
             body["response_format"] = {
                 "type": "json_schema",
@@ -166,6 +173,11 @@ class OpenRouterClient:
             return result, parsed
         except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
+            error_detail = str(exc)
+            if isinstance(exc, httpx.HTTPStatusError):
+                response_text = exc.response.text.strip()
+                if response_text:
+                    error_detail = f"{error_detail}; response={response_text[:1500]}"
             session.add(
                 ModelCall(
                     kind=kind,
@@ -173,7 +185,7 @@ class OpenRouterClient:
                     scene_id=scene_id,
                     latency_ms=latency_ms,
                     success=False,
-                    error=str(exc)[:2000],
+                    error=error_detail[:2000],
                 )
             )
             logger.warning(
@@ -182,6 +194,6 @@ class OpenRouterClient:
                 model_name,
                 ",".join(models),
                 latency_ms,
-                str(exc)[:500],
+                error_detail[:1800],
             )
-            raise LLMUnavailable(str(exc)) from exc
+            raise LLMUnavailable(error_detail) from exc
