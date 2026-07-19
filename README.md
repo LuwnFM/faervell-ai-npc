@@ -81,13 +81,17 @@ docker compose exec app faervell-npc ingest data/sources.yaml
 7. Укажите GM-роли в `DISCORD_GM_ROLE_IDS=123,456`. Администратор сервера всегда считается GM.
 8. При успешном старте в логах появится `Discord application commands synced: ...`. Если slash-команды не появились, GM может написать `!stranger-sync`, а после появления группы использовать `/stranger commands_sync`.
 
-После запуска зарегистрируйте несколько каналов-локаций:
+При старте бот автоматически регистрирует доступные текстовые каналы в RP-категориях Фаервелла. Повторная синхронизация:
 
 ```text
-/stranger scene_enable location:Рынок Харгатрена mask:herbalist
+/stranger locations_sync
+```
+
+Отдельный тестовый канал вне RP-категорий можно зарегистрировать вручную:
+
+```text
+/stranger scene_enable location:Тестовая локация mask:traveler
 /stranger appearance_chance percent:20
-/stranger scene_enable location:Северная дорога mask:guide
-/stranger appearance_chance percent:10
 /stranger status
 ```
 
@@ -111,8 +115,14 @@ docker compose exec app faervell-npc ingest data/sources.yaml
 /stranger arrival_announcements enabled:true
 /stranger cross_location_summons enabled:true
 /stranger move_here
+/stranger appear_now
+/stranger movement_lock enabled:true
+/stranger event_locations enabled:false
+/stranger permissions
 /stranger travel_clear
 ```
+
+`move_here` меняет физическую локацию без публичного поста. `appear_now` сразу отправляет видимый RP-пост появления и удобен для тестов. `movement_lock enabled:true` закрепляет Странника в текущем канале и блокирует случайные переходы и призывы из других локаций; `enabled:false` снимает ограничение. Категория ивентов по умолчанию исключена и включается отдельным переключателем.
 
 Если Странника пингуют в другой зарегистрированной локации, бот не отвечает из пустого места. Он локально оценивает сообщение. Осмысленная просьба или обращение ставит локацию следующей целью маршрута; `тест`, пустой пинг, одиночная ссылка и похожий шум только записываются в аудит. На каждом цикле движения запланированный переход имеет шанс `TRAVELER_SUMMON_MOVE_CHANCE`, а остальные локации используют собственный процент `appearance_chance`.
 

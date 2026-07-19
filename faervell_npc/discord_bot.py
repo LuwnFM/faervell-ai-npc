@@ -61,7 +61,9 @@ class StrangerCommands(commands.Cog):
         if not await self._require_gm(interaction):
             return
         if interaction.guild_id is None or interaction.channel_id is None:
-            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             scene = await session.get(SceneConfig, str(interaction.channel_id))
@@ -190,7 +192,9 @@ class StrangerCommands(commands.Cog):
         if not await self._require_gm(interaction):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             scene = await session.get(SceneConfig, str(interaction.channel_id))
@@ -210,6 +214,202 @@ class StrangerCommands(commands.Cog):
         )
 
     @stranger.command(
+        name="appear_now",
+        description="Немедленно показать видимый RP-пост появления в этом канале",
+    )
+    async def appear_now(self, interaction: discord.Interaction) -> None:
+        if not await self._require_gm(interaction):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
+            return
+        channel = interaction.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.response.send_message(
+                "Появление возможно только в текстовом канале или ветке.", ephemeral=True
+            )
+            return
+        writable, missing = self.bot._channel_postability(channel)
+        if not writable:
+            await interaction.response.send_message(
+                "Странник видит канал, но не может полноценно писать здесь. "
+                "Не хватает: " + ", ".join(missing),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with SessionLocal() as session:
+            scene = await session.get(SceneConfig, str(interaction.channel_id))
+            if scene is None:
+                scene = SceneConfig(
+                    channel_id=str(interaction.channel_id),
+                    guild_id=str(interaction.guild_id),
+                    enabled=True,
+                    location_name=channel.name,
+                    location_id=self._slug(channel.name),
+                    profession_mask_id="traveler",
+                )
+                session.add(scene)
+                await session.flush()
+            else:
+                scene.enabled = True
+                if not scene.location_name:
+                    scene.location_name = channel.name
+                if not scene.location_id:
+                    scene.location_id = self._slug(channel.name)
+            transition = await self.runtime.presence.set_current_scene(
+                session,
+                guild_id=str(interaction.guild_id),
+                scene=scene,
+                reason="немедленное появление по команде GM",
+            )
+            await session.commit()
+
+        posted, error = await self.bot._announce_arrival(transition)
+        if not posted:
+            await interaction.followup.send(
+                "Локация переключена, но RP-пост отправить не удалось: "
+                + (error or "неизвестная ошибка"),
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            f"Странник немедленно появился в локации **{scene.location_name}**.",
+            ephemeral=True,
+        )
+
+    @stranger.command(
+        name="movement_lock",
+        description="Временно запереть Странника в этом канале или снять ограничение",
+    )
+    async def movement_lock(self, interaction: discord.Interaction, enabled: bool) -> None:
+        if not await self._require_gm(interaction):
+            return
+        if interaction.guild_id is None or interaction.channel_id is None:
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
+            return
+        async with SessionLocal() as session:
+            scene = None
+            if enabled:
+                channel = interaction.channel
+                if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    await interaction.response.send_message(
+                        "Ограничение можно включить только в текстовом канале или ветке.",
+                        ephemeral=True,
+                    )
+                    return
+                writable, missing = self.bot._channel_postability(channel)
+                if not writable:
+                    await interaction.response.send_message(
+                        "Нельзя закрепить Странника здесь. Не хватает: " + ", ".join(missing),
+                        ephemeral=True,
+                    )
+                    return
+                scene = await session.get(SceneConfig, str(interaction.channel_id))
+                if scene is None:
+                    scene = SceneConfig(
+                        channel_id=str(interaction.channel_id),
+                        guild_id=str(interaction.guild_id),
+                        enabled=True,
+                        location_name=channel.name,
+                        location_id=self._slug(channel.name),
+                        profession_mask_id="traveler",
+                    )
+                    session.add(scene)
+                    await session.flush()
+                else:
+                    scene.enabled = True
+            presence = await self.runtime.presence.set_movement_lock(
+                session,
+                guild_id=str(interaction.guild_id),
+                enabled=enabled,
+                scene=scene,
+            )
+            await session.commit()
+
+        if enabled:
+            text = (
+                f"Странник временно закреплён в **{presence.current_location_name or 'этом канале'}**. "
+                "Случайные переходы и призывы из других локаций не сработают."
+            )
+        else:
+            text = "Ограничение снято. Странник снова может перемещаться между локациями."
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @stranger.command(
+        name="event_locations",
+        description="Разрешить или запретить автоматические появления в категории ивентов",
+    )
+    async def event_locations(self, interaction: discord.Interaction, enabled: bool) -> None:
+        if not await self._require_gm(interaction):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
+            return
+        async with SessionLocal() as session:
+            await self.runtime.presence.set_event_locations_enabled(
+                session,
+                guild_id=str(interaction.guild_id),
+                enabled=enabled,
+            )
+            await session.commit()
+        state = "разрешены" if enabled else "запрещены"
+        await interaction.response.send_message(
+            f"Автоматические появления в категории ивентов **{state}**.",
+            ephemeral=True,
+        )
+
+    @stranger.command(
+        name="locations_sync",
+        description="Синхронизировать RP-каналы из разрешённых категорий",
+    )
+    async def locations_sync(self, interaction: discord.Interaction) -> None:
+        if not await self._require_gm(interaction):
+            return
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        report = await self.bot.sync_location_scenes(interaction.guild_id)
+        await interaction.followup.send(
+            "RP-каналы синхронизированы: "
+            f"новых **{report['registered']}**, обновлено **{report['updated']}**, "
+            f"пропущено без прав **{report['skipped_permissions']}**.",
+            ephemeral=True,
+        )
+
+    @stranger.command(
+        name="permissions",
+        description="Проверить эффективные права Странника в этом канале",
+    )
+    async def permissions(self, interaction: discord.Interaction) -> None:
+        channel = interaction.channel
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            await interaction.response.send_message(
+                "Проверка доступна только в текстовом канале или ветке.", ephemeral=True
+            )
+            return
+        writable, missing = self.bot._channel_postability(channel)
+        category_id = self.bot._channel_category_id(channel)
+        if writable:
+            state = "**может читать историю и писать RP-посты**"
+        else:
+            state = "**не может полноценно работать**; не хватает: " + ", ".join(missing)
+        await interaction.response.send_message(
+            f"Категория: `{category_id or 'нет'}`\nСтатус: {state}",
+            ephemeral=True,
+        )
+
+    @stranger.command(
         name="cross_location_summons",
         description="Разрешить или запретить планирование маршрута по пингам из других локаций",
     )
@@ -221,7 +421,9 @@ class StrangerCommands(commands.Cog):
         if not await self._require_gm(interaction):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             await self.runtime.presence.set_summons_enabled(
@@ -241,7 +443,9 @@ class StrangerCommands(commands.Cog):
         if not await self._require_gm(interaction):
             return
         if interaction.guild_id is None:
-            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             await self.runtime.presence.clear_destination(
@@ -251,7 +455,9 @@ class StrangerCommands(commands.Cog):
             await session.commit()
         await interaction.response.send_message("Следующая цель маршрута очищена.", ephemeral=True)
 
-    @stranger.command(name="character_bind", description="Привязать активного RP-персонажа к аккаунту")
+    @stranger.command(
+        name="character_bind", description="Привязать активного RP-персонажа к аккаунту"
+    )
     async def character_bind(
         self,
         interaction: discord.Interaction,
@@ -259,18 +465,24 @@ class StrangerCommands(commands.Cog):
         character_id: str,
     ) -> None:
         if interaction.guild_id is None:
-            await interaction.response.send_message("Команда работает только на сервере.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только на сервере.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             existing = (
-                await session.execute(
-                    select(CharacterBinding).where(
-                        CharacterBinding.guild_id == str(interaction.guild_id),
-                        CharacterBinding.discord_user_id == str(interaction.user.id),
-                        CharacterBinding.active.is_(True),
+                (
+                    await session.execute(
+                        select(CharacterBinding).where(
+                            CharacterBinding.guild_id == str(interaction.guild_id),
+                            CharacterBinding.discord_user_id == str(interaction.user.id),
+                            CharacterBinding.active.is_(True),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for binding in existing:
                 binding.active = False
             session.add(
@@ -323,7 +535,9 @@ class StrangerCommands(commands.Cog):
     )
     async def identity_reset(self, interaction: discord.Interaction) -> None:
         if interaction.channel_id is None:
-            await interaction.response.send_message("Команда работает только в канале.", ephemeral=True)
+            await interaction.response.send_message(
+                "Команда работает только в канале.", ephemeral=True
+            )
             return
         async with SessionLocal() as session:
             scene = await session.get(SceneConfig, str(interaction.channel_id))
@@ -394,10 +608,26 @@ class StrangerCommands(commands.Cog):
             f"Странник сейчас: **{presence.current_location_name if presence and presence.current_location_name else 'не появился'}**",
             f"Следующая цель: **{presence.next_location_name if presence and presence.next_location_name else 'не запланирована'}**",
             f"Переходы по пингам: **{'включены' if presence and presence.cross_location_summons_enabled else 'выключены'}**",
+            f"Ограничение одним каналом: **{'включено' if presence and presence.movement_locked else 'выключено'}**",
+            f"Ивент-локации: **{'разрешены' if presence and presence.event_locations_enabled else 'выключены'}**",
             f"LLM: **{'включён' if self.settings.llm_enabled else 'локальный fallback'}**",
             f"Анкет персонажей: **{characters}**",
             f"Непроверенных пробелов знаний: **{gaps}**",
         ]
+        channel = interaction.channel
+        if isinstance(channel, (discord.TextChannel, discord.Thread)):
+            writable, missing = self.bot._channel_postability(channel)
+            automatic_scope = self.bot._channel_is_automatic_scope(
+                channel,
+                event_locations_enabled=bool(presence and presence.event_locations_enabled),
+            )
+            permission_text = "может писать" if writable else "не хватает: " + ", ".join(missing)
+            lines.append(f"Права в канале: **{permission_text}**")
+            lines.append(
+                "Автоматическая локация: **"
+                + ("да" if automatic_scope else "нет; доступна только вручную")
+                + "**"
+            )
         if scene is not None:
             lines.insert(
                 4,
@@ -434,7 +664,9 @@ class StrangerCommands(commands.Cog):
         finally:
             await ingestor.close()
 
-    @stranger.command(name="behavior_scan", description="Экспортировать важные случаи для ручного патча")
+    @stranger.command(
+        name="behavior_scan", description="Экспортировать важные случаи для ручного патча"
+    )
     async def behavior_scan(self, interaction: discord.Interaction, days: int = 30) -> None:
         if not await self._require_gm(interaction):
             return
@@ -488,6 +720,7 @@ class FaervellBot(commands.Bot):
         self.runtime = runtime
         self.settings = settings
         self._registry_bootstrap_done = False
+        self._locations_bootstrap_done = False
         self._presence_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
@@ -511,9 +744,140 @@ class FaervellBot(commands.Bot):
             synced = await self.tree.sync()
         return len(synced)
 
+    @staticmethod
+    def _channel_category_id(channel: discord.abc.GuildChannel | discord.Thread) -> int | None:
+        if isinstance(channel, discord.Thread):
+            parent = channel.parent
+            return parent.category_id if parent is not None else None
+        return getattr(channel, "category_id", None)
+
+    @staticmethod
+    def _channel_postability(
+        channel: discord.abc.GuildChannel | discord.Thread,
+    ) -> tuple[bool, list[str]]:
+        member = channel.guild.me
+        if member is None:
+            return False, ["бот не найден среди участников сервера"]
+        permissions = channel.permissions_for(member)
+        missing: list[str] = []
+        if not permissions.view_channel:
+            missing.append("Просматривать канал")
+        if isinstance(channel, discord.Thread):
+            if not permissions.send_messages_in_threads:
+                missing.append("Отправлять сообщения в ветках")
+        elif not permissions.send_messages:
+            missing.append("Отправлять сообщения")
+        if not permissions.read_message_history:
+            missing.append("Читать историю сообщений")
+        return not missing, missing
+
+    def _channel_is_automatic_scope(
+        self,
+        channel: discord.abc.GuildChannel | discord.Thread,
+        *,
+        event_locations_enabled: bool,
+    ) -> bool:
+        category_id = self._channel_category_id(channel)
+        if category_id in set(self.settings.traveler_rp_category_ids):
+            return True
+        return bool(
+            event_locations_enabled
+            and self.settings.traveler_events_category_id is not None
+            and category_id == self.settings.traveler_events_category_id
+        )
+
+    def _automatic_destination_ids(
+        self,
+        guild: discord.Guild,
+        *,
+        event_locations_enabled: bool,
+    ) -> set[str]:
+        result: set[str] = set()
+        for channel in guild.text_channels:
+            if not self._channel_is_automatic_scope(
+                channel,
+                event_locations_enabled=event_locations_enabled,
+            ):
+                continue
+            writable, _ = self._channel_postability(channel)
+            if writable:
+                result.add(str(channel.id))
+        return result
+
+    async def sync_location_scenes(self, guild_id: int) -> dict[str, int]:
+        guild = self.get_guild(guild_id)
+        if guild is None:
+            guild = await self.fetch_guild(guild_id)
+        normal_categories = set(self.settings.traveler_rp_category_ids)
+        event_category = self.settings.traveler_events_category_id
+        target_categories = set(normal_categories)
+        if event_category is not None:
+            target_categories.add(event_category)
+
+        registered = 0
+        updated = 0
+        skipped_permissions = 0
+        async with SessionLocal() as session:
+            for channel in guild.text_channels:
+                if channel.category_id not in target_categories:
+                    continue
+                writable, _ = self._channel_postability(channel)
+                if not writable:
+                    skipped_permissions += 1
+                    continue
+                scene = await session.get(SceneConfig, str(channel.id))
+                if scene is None:
+                    scene = SceneConfig(
+                        channel_id=str(channel.id),
+                        guild_id=str(guild.id),
+                        enabled=True,
+                        location_id=re.sub(
+                            r"[^a-zа-яё0-9]+",
+                            "_",
+                            channel.name.casefold(),
+                        ).strip("_"),
+                        location_name=channel.name,
+                        profession_mask_id="traveler",
+                    )
+                    session.add(scene)
+                    registered += 1
+                else:
+                    scene.enabled = True
+                    if not scene.location_name:
+                        scene.location_name = channel.name
+                    if not scene.location_id:
+                        scene.location_id = re.sub(
+                            r"[^a-zа-яё0-9]+",
+                            "_",
+                            channel.name.casefold(),
+                        ).strip("_")
+                    updated += 1
+            await session.commit()
+        return {
+            "registered": registered,
+            "updated": updated,
+            "skipped_permissions": skipped_permissions,
+        }
+
     async def on_ready(self) -> None:
         print(f"Faervell Stranger logged in as {self.user} ({self.user.id if self.user else '?'})")
         if self.settings.discord_guild_id is not None:
+            if (
+                self.settings.traveler_auto_register_locations
+                and not self._locations_bootstrap_done
+            ):
+                self._locations_bootstrap_done = True
+                try:
+                    report = await self.sync_location_scenes(self.settings.discord_guild_id)
+                    print(
+                        "RP location sync: "
+                        f"registered={report['registered']} "
+                        f"updated={report['updated']} "
+                        f"skipped_permissions={report['skipped_permissions']}"
+                    )
+                except Exception as exc:
+                    print(f"RP location sync failed: {type(exc).__name__}: {exc}")
+
             async with SessionLocal() as session:
                 presence = await self.runtime.presence.ensure_presence(
                     session,
@@ -523,7 +887,8 @@ class FaervellBot(commands.Bot):
             print(
                 "Traveler presence: "
                 f"current={presence.current_location_name or 'none'} "
-                f"next={presence.next_location_name or 'none'}"
+                f"next={presence.next_location_name or 'none'} "
+                f"locked={presence.movement_locked}"
             )
 
         if self._presence_task is None or self._presence_task.done():
@@ -537,7 +902,9 @@ class FaervellBot(commands.Bot):
             and self.settings.discord_character_registry_channel_id is not None
         ):
             self._registry_bootstrap_done = True
-            asyncio.create_task(self._bootstrap_character_registry(), name="character-registry-bootstrap")
+            asyncio.create_task(
+                self._bootstrap_character_registry(), name="character-registry-bootstrap"
+            )
 
     async def close(self) -> None:
         if self._presence_task is not None:
@@ -559,7 +926,9 @@ class FaervellBot(commands.Bot):
         referenced_id: str | None = None
         referenced_created_at: datetime | None = None
         if message.reference:
-            referenced_id = str(message.reference.message_id) if message.reference.message_id else None
+            referenced_id = (
+                str(message.reference.message_id) if message.reference.message_id else None
+            )
             resolved = message.reference.resolved
             if isinstance(resolved, discord.Message):
                 replied_to_bot = resolved.author.id == self.user.id
@@ -592,7 +961,9 @@ class FaervellBot(commands.Bot):
             discord_message_id=str(message.id),
             guild_id=str(message.guild.id),
             channel_id=channel_id,
-            thread_id=str(message.channel.id) if isinstance(message.channel, discord.Thread) else None,
+            thread_id=str(message.channel.id)
+            if isinstance(message.channel, discord.Thread)
+            else None,
             author_discord_id=str(message.author.id),
             author_display_name=message.author.display_name,
             content=clean_content or message.content,
@@ -607,12 +978,21 @@ class FaervellBot(commands.Bot):
                 # A reply to an old post does not summon the Stranger after he has left.
                 # Only a fresh direct mention in another registered location may plan travel.
                 if mentioned and not replied_to_bot:
+                    writable = False
+                    automatic_scope = False
+                    if isinstance(message.channel, (discord.TextChannel, discord.Thread)):
+                        writable, _ = self._channel_postability(message.channel)
+                        automatic_scope = self._channel_is_automatic_scope(
+                            message.channel,
+                            event_locations_enabled=presence.event_locations_enabled,
+                        )
                     assessment = await self.runtime.presence.register_cross_location_ping(
                         session,
                         scene=scene,
                         incoming=incoming,
                         mentioned=True,
                         replied_to_bot=False,
+                        allow_scheduling=writable and automatic_scope,
                     )
                 await self.runtime.orchestrator.archive_only(session, incoming)
             if replied_to_bot:
@@ -669,10 +1049,22 @@ class FaervellBot(commands.Bot):
                 await asyncio.sleep(interval)
                 if self.settings.discord_guild_id is None:
                     continue
+                guild = self.get_guild(self.settings.discord_guild_id)
+                if guild is None:
+                    continue
                 async with SessionLocal() as session:
+                    presence = await self.runtime.presence.ensure_presence(
+                        session,
+                        guild_id=str(self.settings.discord_guild_id),
+                    )
+                    allowed_channel_ids = self._automatic_destination_ids(
+                        guild,
+                        event_locations_enabled=presence.event_locations_enabled,
+                    )
                     transition = await self.runtime.presence.tick(
                         session,
                         guild_id=str(self.settings.discord_guild_id),
+                        allowed_channel_ids=allowed_channel_ids,
                     )
                     await session.commit()
                 if transition is None:
@@ -684,23 +1076,38 @@ class FaervellBot(commands.Bot):
                     f"reason={transition.reason}"
                 )
                 if transition.arrival_announcement_enabled:
-                    await self._announce_arrival(transition)
+                    posted, error = await self._announce_arrival(transition)
+                    if not posted:
+                        print(
+                            "Traveler arrival post skipped: "
+                            f"channel={transition.channel_id} error={error or 'unknown'}"
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 print(f"Traveler presence loop failed: {type(exc).__name__}: {exc}")
 
-    async def _announce_arrival(self, transition: PresenceTransition) -> None:
+    async def _announce_arrival(
+        self,
+        transition: PresenceTransition,
+    ) -> tuple[bool, str | None]:
         channel_id = int(transition.channel_id)
         channel = self.get_channel(channel_id)
         if channel is None:
             try:
                 channel = await self.fetch_channel(channel_id)
             except discord.HTTPException as exc:
-                print(f"Arrival channel fetch failed: {type(exc).__name__}: {exc}")
-                return
-        if not hasattr(channel, "send"):
-            return
+                error = f"{type(exc).__name__}: {exc}"
+                print(f"Arrival channel fetch failed: {error}")
+                return False, error
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return False, "цель не является текстовым каналом или веткой"
+
+        writable, missing = self._channel_postability(channel)
+        if not writable:
+            error = "не хватает прав: " + ", ".join(missing)
+            print(f"Arrival announcement blocked: channel={channel_id} {error}")
+            return False, error
 
         text = self._arrival_text(
             profession_mask_id=transition.profession_mask_id,
@@ -711,10 +1118,11 @@ class FaervellBot(commands.Bot):
             enabled=transition.reply_hint_enabled,
         ):
             try:
-                sent = await channel.send(part)  # type: ignore[union-attr]
+                sent = await channel.send(part)
             except discord.HTTPException as exc:
-                print(f"Arrival announcement failed: {type(exc).__name__}: {exc}")
-                return
+                error = f"{type(exc).__name__}: {exc}"
+                print(f"Arrival announcement failed: {error}")
+                return False, error
             async with SessionLocal() as session:
                 await self.runtime.orchestrator.record_outgoing(
                     session,
@@ -724,6 +1132,7 @@ class FaervellBot(commands.Bot):
                     content=part,
                     created_at=sent.created_at,
                 )
+        return True, None
 
     @staticmethod
     def _arrival_text(*, profession_mask_id: str, location_name: str | None) -> str:
@@ -782,7 +1191,10 @@ class FaervellBot(commands.Bot):
             for attachment in message.attachments:
                 attachment_urls.append(attachment.url)
                 suffix = Path(attachment.filename).suffix.casefold()
-                if suffix in {".txt", ".md", ".json", ".yaml", ".yml"} and attachment.size <= 2_000_000:
+                if (
+                    suffix in {".txt", ".md", ".json", ".yaml", ".yml"}
+                    and attachment.size <= 2_000_000
+                ):
                     try:
                         payload = await attachment.read(use_cached=True)
                         text_parts.append(payload.decode("utf-8-sig", errors="replace"))

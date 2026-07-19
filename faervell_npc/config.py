@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     traveler_default_appearance_probability: float = Field(default=0.20, ge=0.0, le=1.0)
     traveler_summon_move_chance: float = Field(default=0.75, ge=0.0, le=1.0)
     traveler_cross_location_min_score: float = Field(default=0.58, ge=0.0, le=1.0)
+    traveler_auto_register_locations: bool = True
+    traveler_rp_category_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=lambda: [
+            682909341300293662,
+            1057679719597879437,
+            1133768572510941276,
+            1255157727278403614,
+            1426883198327193640,
+            1057717821552984194,
+            1459852302071631988,
+        ]
+    )
+    traveler_events_category_id: int | None = 1058403455934398495
     character_match_threshold: float = 0.22
     character_match_margin: float = 0.04
 
@@ -65,6 +78,7 @@ class Settings(BaseSettings):
         "discord_guild_id",
         "discord_admin_channel_id",
         "discord_character_registry_channel_id",
+        "traveler_events_category_id",
         mode="before",
     )
     @classmethod
@@ -73,7 +87,13 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("discord_gm_role_ids", "actor_models", "planner_models", mode="before")
+    @field_validator(
+        "discord_gm_role_ids",
+        "actor_models",
+        "planner_models",
+        "traveler_rp_category_ids",
+        mode="before",
+    )
     @classmethod
     def parse_csv(cls, value: object) -> object:
         if isinstance(value, str):

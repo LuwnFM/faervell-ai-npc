@@ -80,18 +80,13 @@ class PresenceService:
                 current_scene = None
 
         if current_scene is None:
-            current_scene = (
-                await session.execute(
-                    select(SceneConfig)
-                    .where(SceneConfig.guild_id == guild_id, SceneConfig.enabled.is_(True))
-                    .order_by(SceneConfig.updated_at.asc())
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if current_scene is not None:
-                self._apply_current_scene(presence, current_scene)
-            else:
-                self._clear_current(presence)
+            self._clear_current(presence)
+            if presence.movement_locked:
+                presence.movement_locked = False
+                presence.locked_channel_id = None
+
+        if presence.movement_locked and presence.locked_channel_id is None:
+            presence.movement_locked = False
 
         return presence
 
@@ -174,6 +169,7 @@ class PresenceService:
         incoming: IncomingMessage,
         mentioned: bool,
         replied_to_bot: bool,
+        allow_scheduling: bool = True,
     ) -> PingAssessment:
         presence = await self.ensure_presence(session, guild_id=incoming.guild_id)
         assessment = self.assess_cross_location_ping(
@@ -192,7 +188,11 @@ class PresenceService:
         if existing is not None:
             return PingAssessment(existing.classification, existing.score, existing.reason)
 
-        scheduling_allowed = presence.cross_location_summons_enabled
+        scheduling_allowed = (
+            presence.cross_location_summons_enabled
+            and not presence.movement_locked
+            and allow_scheduling
+        )
         should_schedule = assessment.classification != "RANDOM" and scheduling_allowed
         priority = min(1.0, assessment.score + (0.12 if replied_to_bot else 0.0))
         scheduled_as_next = False
@@ -243,6 +243,8 @@ class PresenceService:
         previous_channel_id = presence.current_channel_id
         previous_location_name = presence.current_location_name
         self._apply_current_scene(presence, scene)
+        if presence.movement_locked:
+            presence.locked_channel_id = scene.channel_id
         self._clear_next(presence)
         return PresenceTransition(
             previous_channel_id=previous_channel_id,
@@ -279,22 +281,60 @@ class PresenceService:
             self._clear_next(presence)
         return presence
 
+    async def set_event_locations_enabled(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        enabled: bool,
+    ) -> TravelerPresence:
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        presence.event_locations_enabled = enabled
+        return presence
+
+    async def set_movement_lock(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        enabled: bool,
+        scene: SceneConfig | None = None,
+    ) -> TravelerPresence:
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        presence.movement_locked = enabled
+        if enabled:
+            if scene is None:
+                raise ValueError("Для блокировки нужна сцена")
+            presence.locked_channel_id = scene.channel_id
+            self._apply_current_scene(presence, scene)
+            self._clear_next(presence)
+        else:
+            presence.locked_channel_id = None
+        return presence
+
     async def tick(
         self,
         session: AsyncSession,
         *,
         guild_id: str,
+        allowed_channel_ids: set[str] | None = None,
     ) -> PresenceTransition | None:
         if not self.settings.traveler_presence_enabled:
             return None
 
         presence = await self.ensure_presence(session, guild_id=guild_id)
+        if presence.movement_locked:
+            return None
+
         target: SceneConfig | None = None
         reason = "случайное появление по вероятности локации"
 
         if presence.next_channel_id:
             queued = await session.get(SceneConfig, presence.next_channel_id)
-            if queued is None or not queued.enabled:
+            queued_allowed = (
+                allowed_channel_ids is None or presence.next_channel_id in allowed_channel_ids
+            )
+            if queued is None or not queued.enabled or not queued_allowed:
                 self._clear_next(presence)
             elif self.rng.random() <= self.settings.traveler_summon_move_chance:
                 target = queued
@@ -313,6 +353,8 @@ class PresenceService:
                     )
                 ).scalars()
             )
+            if allowed_channel_ids is not None:
+                scenes = [scene for scene in scenes if scene.channel_id in allowed_channel_ids]
             passed = [
                 scene
                 for scene in scenes

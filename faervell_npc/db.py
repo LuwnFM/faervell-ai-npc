@@ -64,6 +64,26 @@ async def init_db() -> None:
         )
         await conn.execute(
             text(
+                "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS event_locations_enabled BOOLEAN "
+                "NOT NULL DEFAULT FALSE"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS movement_locked BOOLEAN "
+                "NOT NULL DEFAULT FALSE"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS locked_channel_id VARCHAR(32)"
+            )
+        )
+        await conn.execute(
+            text(
                 """
                 CREATE OR REPLACE FUNCTION forbid_conversation_message_mutation()
                 RETURNS trigger AS $$

@@ -13,6 +13,11 @@ def test_required_slash_commands_are_registered_in_group() -> None:
         "appearance_chance",
         "cross_location_summons",
         "move_here",
+        "appear_now",
+        "movement_lock",
+        "event_locations",
+        "locations_sync",
+        "permissions",
         "commands_sync",
     }.issubset(names)
 

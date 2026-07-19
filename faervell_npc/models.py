@@ -118,6 +118,9 @@ class TravelerPresence(Base):
     next_requested_by_discord_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     next_priority: Mapped[float] = mapped_column(Float, default=0.0)
     cross_location_summons_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    event_locations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    movement_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    locked_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

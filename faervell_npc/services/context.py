@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from faervell_npc.models import Quest, SceneConfig
 from faervell_npc.schemas import IncomingMessage, SceneContext
-from faervell_npc.services.characters import CharacterRegistryService, CharacterResolution
+from faervell_npc.services.characters import (
+    CharacterRegistryService,
+    CharacterResolution,
+)
 from faervell_npc.services.memory import MemoryService
 
 

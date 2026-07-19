@@ -27,3 +27,23 @@ def test_presence_defaults_are_safe() -> None:
     assert 0 <= settings.traveler_default_appearance_probability <= 1
     assert 0 <= settings.traveler_summon_move_chance <= 1
     assert settings.discord_reply_hint_text
+
+
+def test_faervell_rp_category_defaults() -> None:
+    settings = Settings()
+    assert settings.traveler_auto_register_locations
+    assert set(settings.traveler_rp_category_ids) == {
+        682909341300293662,
+        1057679719597879437,
+        1133768572510941276,
+        1255157727278403614,
+        1426883198327193640,
+        1057717821552984194,
+        1459852302071631988,
+    }
+    assert settings.traveler_events_category_id == 1058403455934398495
+
+
+def test_category_ids_parse_from_csv() -> None:
+    settings = Settings(traveler_rp_category_ids="1,2,3")
+    assert settings.traveler_rp_category_ids == [1, 2, 3]
