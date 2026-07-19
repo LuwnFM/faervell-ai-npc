@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -12,8 +13,9 @@ class Settings(BaseSettings):
 
     discord_token: str = ""
     discord_guild_id: int | None = None
-    discord_gm_role_ids: list[int] = Field(default_factory=list)
+    discord_gm_role_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     discord_admin_channel_id: int | None = None
+    discord_character_registry_channel_id: int | None = None
     discord_command_prefix: str = "!"
 
     database_url: str = "postgresql+asyncpg://faervell:faervell@localhost:5432/faervell"
@@ -24,8 +26,8 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_site_url: str = ""
     openrouter_app_name: str = "Faervell Stranger NPC"
-    actor_models: list[str] = Field(default_factory=lambda: ["openrouter/free"])
-    planner_models: list[str] = Field(
+    actor_models: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["openrouter/free"])
+    planner_models: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["openai/gpt-5-nano", "google/gemini-2.5-flash-lite"]
     )
     actor_max_tokens: int = 650
@@ -43,12 +45,19 @@ class Settings(BaseSettings):
     max_retrieved_memories: int = 5
     max_retrieved_knowledge: int = 6
     bot_reply_cooldown_seconds: int = 2
+    character_match_threshold: float = 0.22
+    character_match_margin: float = 0.04
 
     behavior_pack_path: Path = Path("behavior-pack")
     data_path: Path = Path("data")
 
 
-    @field_validator("discord_guild_id", "discord_admin_channel_id", mode="before")
+    @field_validator(
+        "discord_guild_id",
+        "discord_admin_channel_id",
+        "discord_character_registry_channel_id",
+        mode="before",
+    )
     @classmethod
     def parse_optional_int(cls, value: object) -> object:
         if value is None or value == "":

@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import hashlib
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from faervell_npc.config import get_settings
-from faervell_npc.models import CharacterBinding, Quest, SceneConfig
+from faervell_npc.models import Quest, SceneConfig
 from faervell_npc.schemas import IncomingMessage, SceneContext
+from faervell_npc.services.characters import CharacterRegistryService, CharacterResolution
 from faervell_npc.services.memory import MemoryService
 
 
 class SceneContextBuilder:
-    def __init__(self, memory: MemoryService) -> None:
+    def __init__(self, memory: MemoryService, characters: CharacterRegistryService) -> None:
         self.memory = memory
-        self.settings = get_settings()
+        self.characters = characters
 
     async def ensure_scene(
         self,
@@ -36,28 +34,9 @@ class SceneContextBuilder:
         self,
         session: AsyncSession,
         incoming: IncomingMessage,
-    ) -> tuple[str, str]:
-        if incoming.character_id:
-            return incoming.character_id, incoming.author_display_name
-        binding = (
-            await session.execute(
-                select(CharacterBinding)
-                .where(
-                    CharacterBinding.guild_id == incoming.guild_id,
-                    CharacterBinding.discord_user_id == incoming.author_discord_id,
-                    CharacterBinding.active.is_(True),
-                )
-                .order_by(CharacterBinding.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if binding:
-            return binding.character_id, binding.character_name
-        digest = hashlib.blake2b(
-            f"{self.settings.pseudonym_secret}:{incoming.guild_id}:{incoming.author_discord_id}".encode(),
-            digest_size=12,
-        ).hexdigest()
-        return f"anon:{digest}", incoming.author_display_name
+        scene: SceneConfig,
+    ) -> CharacterResolution:
+        return await self.characters.resolve(session, incoming, scene)
 
     async def build(
         self,

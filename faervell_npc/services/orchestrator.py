@@ -20,6 +20,7 @@ from faervell_npc.schemas import (
     ProcessResult,
     ResponseType,
     Route,
+    RouteDecision,
     SceneContext,
 )
 from faervell_npc.services.actor import ActorService
@@ -62,8 +63,8 @@ class StrangerOrchestrator:
 
     async def archive_only(self, session: AsyncSession, incoming: IncomingMessage) -> None:
         scene = await self.contexts.ensure_scene(session, incoming)
-        character_id, _ = await self.contexts.resolve_character(session, incoming)
-        await self._archive_incoming(session, incoming, scene, character_id)
+        resolution = await self.contexts.resolve_character(session, incoming, scene)
+        await self._archive_incoming(session, incoming, scene, resolution.character_id)
         await session.commit()
 
     async def process(self, session: AsyncSession, incoming: IncomingMessage) -> ProcessResult:
@@ -72,8 +73,20 @@ class StrangerOrchestrator:
             return replay
 
         scene = await self.contexts.ensure_scene(session, incoming)
-        character_id, character_name = await self.contexts.resolve_character(session, incoming)
+        resolution = await self.contexts.resolve_character(session, incoming, scene)
+        character_id = resolution.character_id
+        character_name = resolution.display_name
         await self._archive_incoming(session, incoming, scene, character_id)
+
+        if resolution.requires_presentation or resolution.requires_name:
+            return await self._identity_required_result(
+                session,
+                incoming=incoming,
+                scene=scene,
+                character_id=character_id,
+                character_name=character_name,
+                requires_name=resolution.requires_name,
+            )
 
         context = await self.contexts.build(session, incoming, scene, character_id, character_name)
         route = self.router.decide(incoming.content, has_active_quest=bool(context.active_quests))
@@ -157,6 +170,75 @@ class StrangerOrchestrator:
             planner_escalated=route.route == Route.PLANNER,
             guard_passed=guard_result.passed,
             citations=citations,
+        )
+
+
+    async def _identity_required_result(
+        self,
+        session: AsyncSession,
+        *,
+        incoming: IncomingMessage,
+        scene: SceneConfig,
+        character_id: str,
+        character_name: str,
+        requires_name: bool,
+    ) -> ProcessResult:
+        if requires_name:
+            response = (
+                "Странник задерживает на собеседнике внимательный взгляд. "
+                "«Облик я запомнил. Но как мне тебя называть?»"
+            )
+        else:
+            response = (
+                "Странник на миг отрывается от своего занятия и оглядывает незнакомца. "
+                "«Прежде чем продолжим, назовись — или опиши себя так, чтобы я понимал, "
+                "с кем говорю»."
+            )
+        route = RouteDecision(
+            route=Route.CHAT,
+            reason="character_presentation_required",
+            confidence=1.0,
+        )
+        packet = ActorPacket(
+            response_type=ResponseType.DIALOGUE,
+            scene_id=scene.scene_id,
+            player_name=character_name,
+            profession_mask_id=scene.profession_mask_id,
+            location_name=scene.location_name,
+            facts_forbidden=[
+                "Не приписывай собеседнику анкетные сведения до сопоставления личности.",
+            ],
+            max_length_words=80,
+        )
+        session.add(
+            AuditLog(
+                actor_type="PLAYER",
+                actor_id=character_id,
+                action="NPC_RESPONSE_PREPARED",
+                scene_id=scene.scene_id,
+                message_id=incoming.discord_message_id,
+                details={
+                    "route": route.model_dump(mode="json"),
+                    "actor_model": None,
+                    "planner_model": None,
+                    "guard_passed": True,
+                    "guard_violations": [],
+                    "actor_packet": packet.model_dump(mode="json"),
+                    "response": response,
+                    "citations": [],
+                },
+            )
+        )
+        await session.commit()
+        return ProcessResult(
+            route=route,
+            response=response,
+            actor_packet=packet,
+            used_actor_model=None,
+            used_planner_model=None,
+            planner_escalated=False,
+            guard_passed=True,
+            citations=[],
         )
 
 

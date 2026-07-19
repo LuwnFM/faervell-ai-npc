@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from faervell_npc.models import CharacterBinding, KnowledgeGap, SceneConfig
 from faervell_npc.runtime import Runtime
 from faervell_npc.schemas import IncomingMessage
 from faervell_npc.services.behavior import BehaviorManager
+from faervell_npc.services.characters import CharacterSheetParser
 from faervell_npc.services.ingest import SourceIngestor
 
 
@@ -132,6 +134,60 @@ class StrangerCommands(commands.Cog):
             f"Активный персонаж: **{character_name}** (`{character_id}`).", ephemeral=True
         )
 
+    @stranger.command(
+        name="characters_sync",
+        description="Загрузить анкеты персонажей из настроенного Discord-канала",
+    )
+    async def characters_sync(self, interaction: discord.Interaction) -> None:
+        if not await self._require_gm(interaction):
+            return
+        channel_id = self.settings.discord_character_registry_channel_id
+        if channel_id is None:
+            await interaction.response.send_message(
+                "Не задан DISCORD_CHARACTER_REGISTRY_CHANNEL_ID.",
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            report = await self.bot.sync_character_registry(channel_id, full=True)
+        except Exception as exc:
+            await interaction.followup.send(
+                f"Импорт анкет завершился ошибкой: `{type(exc).__name__}: {exc}`",
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(
+            "Анкеты синхронизированы: "
+            f"найдено **{report['records']}**, загружено **{report['imported']}**, "
+            f"пропущено **{report['skipped']}**, деактивировано **{report['deactivated']}**.",
+            ephemeral=True,
+        )
+
+    @stranger.command(
+        name="identity_reset",
+        description="Забыть выбранного персонажа в этой сцене и представиться заново",
+    )
+    async def identity_reset(self, interaction: discord.Interaction) -> None:
+        if interaction.channel_id is None:
+            await interaction.response.send_message("Команда работает только в канале.", ephemeral=True)
+            return
+        async with SessionLocal() as session:
+            scene = await session.get(SceneConfig, str(interaction.channel_id))
+            if scene is None:
+                await interaction.response.send_message("В этом канале нет сцены.", ephemeral=True)
+                return
+            await self.runtime.characters.reset_identity(
+                session,
+                scene_id=scene.scene_id,
+                discord_user_id=str(interaction.user.id),
+            )
+            await session.commit()
+        await interaction.response.send_message(
+            "Личность для этой сцены сброшена. Представьтесь Страннику снова.",
+            ephemeral=True,
+        )
+
     @stranger.command(name="status", description="Показать состояние сцены и сервисов")
     async def status(self, interaction: discord.Interaction) -> None:
         async with SessionLocal() as session:
@@ -141,11 +197,16 @@ class StrangerCommands(commands.Cog):
                     select(func.count(KnowledgeGap.id)).where(KnowledgeGap.status == "PENDING")
                 )
             ).scalar_one()
+            characters = await self.runtime.characters.count_profiles(
+                session,
+                str(interaction.guild_id) if interaction.guild_id else None,
+            )
         description = (
             f"Сцена: **{'включена' if scene and scene.enabled else 'выключена'}**\n"
             f"Локация: **{scene.location_name if scene else '—'}**\n"
             f"Маска: **{scene.profession_mask_id if scene else '—'}**\n"
             f"LLM: **{'включён' if self.settings.llm_enabled else 'локальный fallback'}**\n"
+            f"Анкет персонажей: **{characters}**\n"
             f"Непроверенных пробелов знаний: **{gaps}**"
         )
         await interaction.response.send_message(description, ephemeral=True)
@@ -201,6 +262,7 @@ class FaervellBot(commands.Bot):
         super().__init__(command_prefix=settings.discord_command_prefix, intents=intents)
         self.runtime = runtime
         self.settings = settings
+        self._registry_bootstrap_done = False
 
     async def setup_hook(self) -> None:
         await self.add_cog(StrangerCommands(self, self.runtime))
@@ -213,6 +275,12 @@ class FaervellBot(commands.Bot):
 
     async def on_ready(self) -> None:
         print(f"Faervell Stranger logged in as {self.user} ({self.user.id if self.user else '?'})")
+        if (
+            not self._registry_bootstrap_done
+            and self.settings.discord_character_registry_channel_id is not None
+        ):
+            self._registry_bootstrap_done = True
+            asyncio.create_task(self._bootstrap_character_registry(), name="character-registry-bootstrap")
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None or self.user is None:
@@ -272,6 +340,129 @@ class FaervellBot(commands.Bot):
                         content=part,
                         created_at=sent.created_at,
                     )
+
+    async def _bootstrap_character_registry(self) -> None:
+        try:
+            async with SessionLocal() as session:
+                count = await self.runtime.characters.count_profiles(
+                    session,
+                    str(self.settings.discord_guild_id) if self.settings.discord_guild_id else None,
+                )
+            if count == 0 and self.settings.discord_character_registry_channel_id is not None:
+                report = await self.sync_character_registry(
+                    self.settings.discord_character_registry_channel_id,
+                    full=True,
+                )
+                print(
+                    "Character registry bootstrap: "
+                    f"imported={report['imported']} skipped={report['skipped']}"
+                )
+        except Exception as exc:
+            print(f"Character registry bootstrap failed: {type(exc).__name__}: {exc}")
+
+    async def sync_character_registry(
+        self,
+        channel_id: int,
+        *,
+        full: bool,
+    ) -> dict[str, int]:
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            channel = await self.fetch_channel(channel_id)
+        if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            raise TypeError("Канал анкет должен быть текстовым каналом или веткой")
+        if channel.guild.id != self.settings.discord_guild_id:
+            raise ValueError("Канал анкет находится не на настроенном Discord-сервере")
+
+        records: list[dict[str, object]] = []
+        current: dict[str, object] | None = None
+
+        async for message in channel.history(limit=None, oldest_first=True):
+            text_parts = [message.content] if message.content else []
+            attachment_urls: list[str] = []
+            for attachment in message.attachments:
+                attachment_urls.append(attachment.url)
+                suffix = Path(attachment.filename).suffix.casefold()
+                if suffix in {".txt", ".md", ".json", ".yaml", ".yml"} and attachment.size <= 2_000_000:
+                    try:
+                        payload = await attachment.read(use_cached=True)
+                        text_parts.append(payload.decode("utf-8-sig", errors="replace"))
+                    except discord.HTTPException:
+                        pass
+            message_text = "\n".join(part for part in text_parts if part).strip()
+            parsed_start = CharacterSheetParser.parse(message_text)
+            owner = message.mentions[0] if message.mentions else None
+
+            if parsed_start is not None and owner is not None:
+                if current is not None:
+                    records.append(current)
+                current = {
+                    "guild_id": str(channel.guild.id),
+                    "owner_id": str(owner.id),
+                    "source_channel_id": str(channel.id),
+                    "source_message_id": str(message.id),
+                    "source_created_at": message.created_at,
+                    "author_id": str(message.author.id),
+                    "parts": [message_text],
+                    "attachments": attachment_urls,
+                }
+                continue
+
+            if current is not None and str(message.author.id) == current["author_id"]:
+                if message_text:
+                    parts = current["parts"]
+                    assert isinstance(parts, list)
+                    parts.append(message_text)
+                attachments = current["attachments"]
+                assert isinstance(attachments, list)
+                attachments.extend(attachment_urls)
+
+        if current is not None:
+            records.append(current)
+
+        imported = 0
+        skipped = 0
+        seen: set[str] = set()
+        async with SessionLocal() as session:
+            for record in records:
+                source_message_id = str(record["source_message_id"])
+                seen.add(source_message_id)
+                parts = record["parts"]
+                attachments = record["attachments"]
+                assert isinstance(parts, list)
+                assert isinstance(attachments, list)
+                source_created_at = record["source_created_at"]
+                if not isinstance(source_created_at, datetime):
+                    source_created_at = None
+                profile = await self.runtime.characters.upsert_profile(
+                    session,
+                    guild_id=str(record["guild_id"]),
+                    owner_discord_user_id=str(record["owner_id"]),
+                    source_channel_id=str(record["source_channel_id"]),
+                    source_message_id=source_message_id,
+                    source_created_at=source_created_at,
+                    text="\n".join(str(part) for part in parts),
+                    attachment_urls=[str(url) for url in attachments],
+                )
+                if profile is None:
+                    skipped += 1
+                else:
+                    imported += 1
+            deactivated = 0
+            if full:
+                deactivated = await self.runtime.characters.deactivate_missing(
+                    session,
+                    guild_id=str(channel.guild.id),
+                    source_channel_id=str(channel.id),
+                    seen_message_ids=seen,
+                )
+            await session.commit()
+        return {
+            "records": len(records),
+            "imported": imported,
+            "skipped": skipped,
+            "deactivated": deactivated,
+        }
 
     def _member_is_gm(self, member: discord.abc.User) -> bool:
         if not isinstance(member, discord.Member):

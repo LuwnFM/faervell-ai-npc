@@ -30,7 +30,7 @@ def create_app(
 
     app = FastAPI(
         title="Faervell AI-NPC",
-        version="0.1.0",
+        version="0.2.0",
         description="Health and operational API for the Discord Stranger NPC.",
         lifespan=lifespan,
     )

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from faervell_npc.services.actor import ActorService
 from faervell_npc.services.cache import SceneLockManager
+from faervell_npc.services.characters import CharacterRegistryService
 from faervell_npc.services.context import SceneContextBuilder
 from faervell_npc.services.decision_cache import DecisionCacheService
 from faervell_npc.services.disclosure import LoreDisclosureEngine
@@ -24,6 +25,7 @@ from faervell_npc.services.tools import ToolExecutor
 class Runtime:
     llm: OpenRouterClient
     locks: SceneLockManager
+    characters: CharacterRegistryService
     orchestrator: StrangerOrchestrator
 
     async def close(self) -> None:
@@ -33,7 +35,8 @@ class Runtime:
 
 def build_runtime() -> Runtime:
     memory = MemoryService()
-    contexts = SceneContextBuilder(memory)
+    characters = CharacterRegistryService()
+    contexts = SceneContextBuilder(memory, characters)
     router = IntentRouter()
     knowledge = KnowledgeService()
     disclosure = LoreDisclosureEngine()
@@ -58,4 +61,9 @@ def build_runtime() -> Runtime:
         actor=actor,
         guard=guard,
     )
-    return Runtime(llm=llm, locks=SceneLockManager(), orchestrator=orchestrator)
+    return Runtime(
+        llm=llm,
+        locks=SceneLockManager(),
+        characters=characters,
+        orchestrator=orchestrator,
+    )

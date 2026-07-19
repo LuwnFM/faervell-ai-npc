@@ -107,6 +107,65 @@ class CharacterBinding(Base):
     __table_args__ = (UniqueConstraint("guild_id", "discord_user_id", "character_id"),)
 
 
+class CharacterProfile(Base):
+    __tablename__ = "character_profiles"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    owner_discord_user_id: Mapped[str] = mapped_column(String(32), index=True)
+    source_channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    source_message_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    canonical_name: Mapped[str] = mapped_column(String(256), index=True)
+    aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
+    race: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    race_subtype: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    age_text: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sex: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    height_text: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visible_profile: Mapped[str] = mapped_column(Text, default="")
+    full_sheet: Mapped[str] = mapped_column(Text)
+    attachment_urls: Mapped[list[str]] = mapped_column(JSON, default=list)
+    identity_embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dimensions))
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_character_owner_active", "guild_id", "owner_discord_user_id", "active"),
+        Index(
+            "ix_character_identity_embedding_hnsw",
+            "identity_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"identity_embedding": "vector_cosine_ops"},
+        ),
+    )
+
+
+class SceneCharacterIdentity(Base):
+    __tablename__ = "scene_character_identities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    guild_id: Mapped[str] = mapped_column(String(32), index=True)
+    scene_id: Mapped[str] = mapped_column(String(64), index=True)
+    channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    discord_user_id: Mapped[str] = mapped_column(String(32), index=True)
+    character_id: Mapped[str] = mapped_column(String(128), index=True)
+    presented_name: Mapped[str] = mapped_column(String(256))
+    presentation_text: Mapped[str] = mapped_column(Text, default="")
+    match_status: Mapped[str] = mapped_column(String(32), index=True)
+    match_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    source_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index("ix_scene_identity_lookup", "scene_id", "discord_user_id", "active"),
+    )
+
+
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
 
