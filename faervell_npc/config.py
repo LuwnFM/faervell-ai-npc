@@ -7,6 +7,30 @@ from typing import Annotated
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+DEFAULT_ACTOR_MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-120b:free",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "deepseek/deepseek-v4-flash",
+    "openai/gpt-oss-120b",
+    "mistralai/ministral-14b-2512",
+]
+DEFAULT_PLANNER_MODELS = [
+    "deepseek/deepseek-v4-flash",
+    "openai/gpt-oss-120b:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "openai/gpt-oss-120b",
+    "mistralai/ministral-14b-2512",
+]
+DEFAULT_MODEL_BLOCKLIST = [
+    "openrouter/free",
+    "openrouter/auto",
+    "openai/gpt-oss-20b",
+    "nvidia/nemotron-nano-9b-v2",
+    "laguna-2.1-xs",
+    "laguna-2-1-xs",
+]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -26,10 +50,20 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_site_url: str = ""
     openrouter_app_name: str = "Faervell Stranger NPC"
-    actor_models: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["openrouter/free"])
-    planner_models: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["openai/gpt-5-nano", "google/gemini-2.5-flash-lite"]
+    actor_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_ACTOR_MODELS)
     )
+    planner_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_PLANNER_MODELS)
+    )
+    model_blocklist: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_MODEL_BLOCKLIST)
+    )
+    openrouter_allow_paid_fallback: bool = True
+    openrouter_max_prompt_price_per_million: float = Field(default=0.20, ge=0.0)
+    openrouter_max_completion_price_per_million: float = Field(default=0.20, ge=0.0)
+    openrouter_max_request_price_usd: float = Field(default=0.0, ge=0.0)
+    openrouter_planner_reasoning_effort: str = "high"
     actor_max_tokens: int = 650
     planner_max_tokens: int = 1600
     planner_daily_budget_usd: float = 2.0
@@ -73,7 +107,6 @@ class Settings(BaseSettings):
     behavior_pack_path: Path = Path("behavior-pack")
     data_path: Path = Path("data")
 
-
     @field_validator(
         "discord_guild_id",
         "discord_admin_channel_id",
@@ -87,10 +120,22 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("openrouter_planner_reasoning_effort", mode="before")
+    @classmethod
+    def parse_reasoning_effort(cls, value: object) -> str:
+        effort = str(value or "").strip().casefold()
+        allowed = {"none", "minimal", "low", "medium", "high", "xhigh"}
+        if effort not in allowed:
+            raise ValueError(
+                "OPENROUTER_PLANNER_REASONING_EFFORT must be one of: " + ", ".join(sorted(allowed))
+            )
+        return effort
+
     @field_validator(
         "discord_gm_role_ids",
         "actor_models",
         "planner_models",
+        "model_blocklist",
         "traveler_rp_category_ids",
         mode="before",
     )
@@ -104,6 +149,32 @@ class Settings(BaseSettings):
                 return [int(item) for item in items]
             return items
         return value
+
+    def filter_allowed_models(self, models: list[str]) -> list[str]:
+        """Return a stable, de-duplicated model list that cannot escape the configured policy."""
+        blocked = [item.casefold().strip() for item in self.model_blocklist if item.strip()]
+        accepted: list[str] = []
+        seen: set[str] = set()
+        for raw_model in models:
+            model = raw_model.strip()
+            folded = model.casefold()
+            if not model or folded in seen:
+                continue
+            if any(token in folded for token in blocked):
+                continue
+            if not self.openrouter_allow_paid_fallback and not folded.endswith(":free"):
+                continue
+            seen.add(folded)
+            accepted.append(model)
+        return accepted
+
+    @property
+    def effective_actor_models(self) -> list[str]:
+        return self.filter_allowed_models(self.actor_models)
+
+    @property
+    def effective_planner_models(self) -> list[str]:
+        return self.filter_allowed_models(self.planner_models)
 
     @property
     def llm_enabled(self) -> bool:

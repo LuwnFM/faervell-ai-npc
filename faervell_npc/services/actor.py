@@ -47,7 +47,7 @@ class ActorService:
                 session,
                 kind="ACTOR",
                 scene_id=packet.scene_id,
-                models=self.settings.actor_models,
+                models=self.settings.effective_actor_models,
                 messages=[
                     {"role": "system", "content": "\n".join(instructions)},
                     {

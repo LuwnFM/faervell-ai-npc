@@ -51,7 +51,7 @@ class PlannerService:
                 session,
                 kind="PLANNER_PLAN",
                 scene_id=context.scene_id,
-                models=self.settings.planner_models,
+                models=self.settings.effective_planner_models,
                 messages=[
                     {
                         "role": "system",
@@ -140,7 +140,7 @@ class PlannerService:
             session,
             kind="PLANNER_FINALIZE",
             scene_id=context.scene_id,
-            models=self.settings.planner_models,
+            models=self.settings.effective_planner_models,
             messages=[
                 {
                     "role": "system",

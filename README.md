@@ -371,3 +371,10 @@ Discord-вложения.
 /stranger characters_sync  — полная синхронизация канала анкет (GM)
 /stranger identity_reset   — представить в текущей сцене другого персонажа
 ```
+
+## Strict model and price policy (v0.6)
+
+Production no longer uses the random `openrouter/free` router. The bot sends an explicit,
+ordered model allowlist, blocks rejected models by slug, and applies a hard OpenRouter
+provider price ceiling to both input and output tokens. DeepSeek V4 Flash is the preferred
+paid planner and the first paid actor fallback. See `docs/v0.6-model-policy.md`.

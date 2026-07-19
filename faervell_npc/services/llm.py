@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -13,6 +14,7 @@ from faervell_npc.config import get_settings
 from faervell_npc.models import ModelCall
 
 T = TypeVar("T", bound=BaseModel)
+logger = logging.getLogger("uvicorn.error")
 
 
 class LLMUnavailable(RuntimeError):
@@ -35,6 +37,15 @@ class OpenRouterClient:
             base_url=self.settings.openrouter_base_url,
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
+        logger.info(
+            "OpenRouter model policy actor=%s planner=%s max_prompt_per_m=%.3f "
+            "max_completion_per_m=%.3f paid_fallback=%s",
+            ",".join(self.settings.effective_actor_models),
+            ",".join(self.settings.effective_planner_models),
+            self.settings.openrouter_max_prompt_price_per_million,
+            self.settings.openrouter_max_completion_price_per_million,
+            self.settings.openrouter_allow_paid_fallback,
+        )
 
     async def close(self) -> None:
         await self.client.aclose()
@@ -53,14 +64,34 @@ class OpenRouterClient:
     ) -> tuple[LLMResult, T | None]:
         if not self.settings.llm_enabled:
             raise LLMUnavailable("OPENROUTER_API_KEY is not configured")
+        models = self.settings.filter_allowed_models(models)
         if not models:
-            raise LLMUnavailable("No model configured")
+            raise LLMUnavailable(
+                "No model remains after applying the explicit allowlist/blocklist policy"
+            )
+
+        provider_policy: dict[str, Any] = {
+            "allow_fallbacks": True,
+            "sort": "price",
+            "max_price": {
+                "prompt": self.settings.openrouter_max_prompt_price_per_million,
+                "completion": self.settings.openrouter_max_completion_price_per_million,
+                "request": self.settings.openrouter_max_request_price_usd,
+            },
+        }
+        reasoning_policy: dict[str, Any] = {"exclude": True}
+        if kind.upper() == "PLANNER":
+            effort = self.settings.openrouter_planner_reasoning_effort
+            if effort != "none":
+                reasoning_policy["effort"] = effort
 
         body: dict[str, Any] = {
             "models": models,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
+            "provider": provider_policy,
+            "reasoning": reasoning_policy,
         }
         if schema_model is not None:
             body["response_format"] = {
@@ -71,7 +102,7 @@ class OpenRouterClient:
                     "schema": schema_model.model_json_schema(),
                 },
             }
-            body["provider"] = {"require_parameters": True}
+            provider_policy["require_parameters"] = True
 
         headers = {
             "Authorization": f"Bearer {self.settings.openrouter_api_key}",
@@ -108,6 +139,7 @@ class OpenRouterClient:
             parsed: T | None = None
             if schema_model is not None:
                 parsed = schema_model.model_validate_json(content)
+            latency_ms = int((time.perf_counter() - started) * 1000)
             session.add(
                 ModelCall(
                     kind=kind,
@@ -116,20 +148,40 @@ class OpenRouterClient:
                     prompt_tokens=result.prompt_tokens,
                     completion_tokens=result.completion_tokens,
                     cost_usd=result.cost_usd,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    latency_ms=latency_ms,
                     success=True,
                 )
             )
+            logger.info(
+                "model_call success kind=%s selected=%s candidates=%s prompt_tokens=%d "
+                "completion_tokens=%d cost_usd=%.8f latency_ms=%d",
+                kind,
+                model_name,
+                ",".join(models),
+                result.prompt_tokens,
+                result.completion_tokens,
+                result.cost_usd,
+                latency_ms,
+            )
             return result, parsed
         except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
             session.add(
                 ModelCall(
                     kind=kind,
                     model=model_name,
                     scene_id=scene_id,
-                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    latency_ms=latency_ms,
                     success=False,
                     error=str(exc)[:2000],
                 )
+            )
+            logger.warning(
+                "model_call failure kind=%s attempted=%s candidates=%s latency_ms=%d error=%s",
+                kind,
+                model_name,
+                ",".join(models),
+                latency_ms,
+                str(exc)[:500],
             )
             raise LLMUnavailable(str(exc)) from exc

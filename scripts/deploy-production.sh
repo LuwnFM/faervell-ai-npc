@@ -15,6 +15,9 @@ test -f .env || {
 
 chmod 600 .env
 git pull --ff-only
+if [[ -x scripts/migrate-v0.6-model-policy.sh ]]; then
+  scripts/migrate-v0.6-model-policy.sh "$APP_DIR/.env"
+fi
 docker compose config >/dev/null
 docker compose up -d --build
 
