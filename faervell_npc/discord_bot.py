@@ -693,10 +693,25 @@ class StrangerCommands(commands.Cog):
                 runtime = GuildRuntimeSettings(guild_id=str(interaction.guild_id))
                 session.add(runtime)
             runtime.gm_review_channel_id = str(interaction.channel_id)
+            pending_ids = list(
+                (
+                    await session.execute(
+                        select(GMReviewRequest.id).where(
+                            GMReviewRequest.guild_id == str(interaction.guild_id),
+                            GMReviewRequest.status == "PENDING",
+                            GMReviewRequest.gm_message_id.is_(None),
+                        )
+                    )
+                ).scalars()
+            )
             await session.commit()
         await interaction.response.send_message(
-            "Этот канал назначен каналом заявок Странника для ГМ.", ephemeral=True
+            "Этот канал назначен служебным каналом заявок Странника. "
+            f"Ожидающих отправки: **{len(pending_ids)}**.",
+            ephemeral=True,
         )
+        for review_id in pending_ids:
+            await self.bot._post_gm_review(review_id)
 
     @stranger.command(
         name="regeneration_limit",
@@ -1242,6 +1257,19 @@ class FaervellBot(commands.Bot):
                     )
                 ).scalars()
             )
+            unposted_review_ids = list(
+                (
+                    await session.execute(
+                        select(GMReviewRequest.id)
+                        .where(
+                            GMReviewRequest.status == "PENDING",
+                            GMReviewRequest.gm_message_id.is_(None),
+                        )
+                        .order_by(GMReviewRequest.created_at.asc())
+                        .limit(200)
+                    )
+                ).scalars()
+            )
         for bundle in bundles:
             if bundle.last_message_id:
                 self.add_view(
@@ -1255,7 +1283,13 @@ class FaervellBot(commands.Bot):
         for review in reviews:
             if review.gm_message_id:
                 self.add_view(GMReviewView(self, review.id), message_id=int(review.gm_message_id))
-        print(f"Persistent views restored: responses={len(bundles)} gm_reviews={len(reviews)}")
+        for review_id in unposted_review_ids:
+            await self._post_gm_review(review_id)
+        print(
+            "Persistent views restored: "
+            f"responses={len(bundles)} gm_reviews={len(reviews)} "
+            f"gm_reviews_retried={len(unposted_review_ids)}"
+        )
 
     async def record_response_feedback(
         self,
@@ -1413,7 +1447,12 @@ class FaervellBot(commands.Bot):
             )
             if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await channel.send(
-                    f"Заявка Странника `{review_id}` {'одобрена' if approved else 'отклонена'} ГМ."
+                    "*Странник ненадолго возвращается к разговору.*\n"
+                    + (
+                        "— Условия прояснились. Это дело можно принять."
+                        if approved
+                        else "— Это поручение пока не состоится. Поищем другое дело."
+                    )
                 )
         except discord.HTTPException:
             pass
@@ -1447,16 +1486,38 @@ class FaervellBot(commands.Bot):
                 f"Исходный канал: <#{review.channel_id}>\n"
                 f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)[:1200]}\n```"
             )
-        channel = self.get_channel(int(configured)) or await self.fetch_channel(int(configured))
+        try:
+            channel_id = int(configured)
+        except (TypeError, ValueError):
+            print(f"Configured GM review channel id is invalid: {configured!r}")
+            return
+        try:
+            channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+            print(
+                "GM review channel fetch failed: "
+                f"review={review_id} channel={configured} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+            return
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             print(f"Configured GM review channel is not text: {configured}")
             return
-        sent = await channel.send(content, view=GMReviewView(self, review_id))
+        try:
+            sent = await channel.send(content, view=GMReviewView(self, review_id))
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException) as exc:
+            print(
+                "GM review post failed: "
+                f"review={review_id} channel={configured} "
+                f"error={type(exc).__name__}: {exc}"
+            )
+            return
         async with SessionLocal() as session:
             review = await session.get(GMReviewRequest, review_id)
             if review is not None:
                 review.gm_message_id = str(sent.id)
                 await session.commit()
+        print(f"GM review posted: review={review_id} channel={configured} message={sent.id}")
 
     async def _send_process_result(
         self,

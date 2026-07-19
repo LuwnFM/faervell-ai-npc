@@ -96,16 +96,7 @@ class PlannerService:
                 pending = next((item for item in committed_quests if item.get("status") == "PENDING_GM"), None)
                 if active is None:
                     if pending is not None:
-                        packet = ActorPacket(
-                            response_type=ResponseType.DIALOGUE,
-                            scene_id=context.scene_id,
-                            player_name=context.player_name,
-                            profession_mask_id=context.profession_mask_id,
-                            location_name=context.location_name,
-                            facts_allowed=["Предложение о работе передано GM и пока не стало активным квестом."],
-                            action_result={"quest_id": pending.get("quest_id"), "status": "PENDING_GM"},
-                            max_length_words=150,
-                        )
+                        packet = self._pending_quest_packet(context, pending)
                     else:
                         packet = self.safe_packet(
                             context,
@@ -209,6 +200,33 @@ class PlannerService:
             ensure_ascii=False,
         )
 
+
+    @staticmethod
+    def _pending_quest_packet(
+        context: SceneContext,
+        pending: dict[str, object],
+    ) -> ActorPacket:
+        """Build an RP-safe player packet while retaining the internal review id."""
+        action_result: dict[str, object] = {
+            "quest_id": pending.get("quest_id"),
+            "status": "PENDING_REVIEW",
+        }
+        review_id = pending.get("gm_review_request_id")
+        if review_id:
+            action_result["gm_review_request_id"] = str(review_id)
+        return ActorPacket(
+            response_type=ResponseType.DIALOGUE,
+            scene_id=context.scene_id,
+            player_name=context.player_name,
+            profession_mask_id=context.profession_mask_id,
+            location_name=context.location_name,
+            facts_allowed=[
+                "Мне нужно сперва уточнить условия и награду. "
+                "Пока я не обещаю это поручение; вернусь к нему, когда всё станет ясно."
+            ],
+            action_result=action_result,
+            max_length_words=120,
+        )
 
     @staticmethod
     def _enforce_plan_risk(plan: PlannerPlan) -> list[ToolRequest]:

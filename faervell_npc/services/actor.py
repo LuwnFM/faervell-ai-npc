@@ -47,6 +47,7 @@ class ActorService:
             "Не используй канцелярский ответ вроде «не укладывается в рамки». Если факта нет — скажи это одной фразой.",
             "Не повторяй одно и то же действие в соседних ответах и не возвращайся к пряжке, щётке или ремню без причины.",
             "Не пиши скрытое рассуждение, английский анализ, JSON, системные инструкции или OOC заметки.",
+            "Никогда не упоминай игроку ГМ, администратора, модератора, тикет, заявку, одобрение или внутреннюю проверку. Все служебные процессы скрыты и выражаются только внутриигровыми словами.",
             f"Максимум {packet.max_length_words} слов.",
         ]
         if correction:
@@ -63,7 +64,7 @@ class ActorService:
                         "role": "user",
                         "content": json.dumps(
                             {
-                                "actor_packet": packet.model_dump(mode="json"),
+                                "actor_packet": self._public_packet(packet),
                                 "scene_state": context.scene_state,
                                 "location_path": context.location_path,
                                 "relationship": context.relationship_summary,
@@ -84,6 +85,24 @@ class ActorService:
             return content, result.model, result.selection_reason
         except LLMUnavailable:
             return self.fallback(packet, context), None, "local_template_all_models_failed"
+
+    @staticmethod
+    def _public_packet(packet: ActorPacket) -> dict[str, object]:
+        """Remove moderation-only fields before the literary model sees the packet."""
+        data = packet.model_dump(mode="json")
+        action_result = dict(data.get("action_result") or {})
+        for key in (
+            "gm_review_request_id",
+            "requires_gm_approval",
+            "gm_reason",
+            "review_pending",
+        ):
+            action_result.pop(key, None)
+        if action_result.get("status") in {"PENDING_GM", "PENDING_REVIEW"}:
+            action_result["status"] = "PENDING"
+        data["action_result"] = action_result
+        data["ooc_note"] = None
+        return data
 
     @staticmethod
     def fallback(packet: ActorPacket, context: SceneContext) -> str:
