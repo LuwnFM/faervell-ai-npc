@@ -20,6 +20,7 @@ from faervell_npc.services.planner import PlannerService
 from faervell_npc.services.presence import PresenceService
 from faervell_npc.services.router import IntentRouter
 from faervell_npc.services.rules import RuleEngine
+from faervell_npc.services.template_library import TemplateLibrary
 from faervell_npc.services.tools import ToolExecutor
 
 
@@ -31,6 +32,7 @@ class Runtime:
     presence: PresenceService
     knowledge: KnowledgeService
     economy: EconomyService
+    templates: TemplateLibrary
     orchestrator: StrangerOrchestrator
 
     async def close(self) -> None:
@@ -39,20 +41,22 @@ class Runtime:
 
 
 def build_runtime() -> Runtime:
-    memory = MemoryService()
+    locks = SceneLockManager()
+    memory = MemoryService(lock_manager=locks)
     characters = CharacterRegistryService()
     presence = PresenceService()
     contexts = SceneContextBuilder(memory, characters)
     router = IntentRouter()
     knowledge = KnowledgeService()
     economy = EconomyService()
+    templates = TemplateLibrary()
     disclosure = LoreDisclosureEngine()
-    rules = RuleEngine()
+    rules = RuleEngine(templates)
     llm = OpenRouterClient()
     tools = ToolExecutor(knowledge, rules, disclosure, economy=economy)
     examples = ApprovedExampleService()
     planner = PlannerService(llm, tools, examples)
-    local_planner = LocalPlanner(tools)
+    local_planner = LocalPlanner(tools, templates)
     decision_cache = DecisionCacheService()
     actor = ActorService(llm)
     guard = OutputGuard()
@@ -70,9 +74,11 @@ def build_runtime() -> Runtime:
     )
     return Runtime(
         llm=llm,
-        locks=SceneLockManager(),
+        locks=locks,
         characters=characters,
         presence=presence,
         knowledge=knowledge,
+        economy=economy,
+        templates=templates,
         orchestrator=orchestrator,
     )

@@ -4,7 +4,6 @@ import hashlib
 import re
 from collections.abc import Iterable
 
-
 _SPACE_RE = re.compile(r"\s+")
 _PUNCT_RE = re.compile(r"[^\w\s-]", re.UNICODE)
 

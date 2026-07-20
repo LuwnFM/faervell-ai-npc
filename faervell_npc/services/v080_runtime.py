@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import MethodType
 from typing import Any
 
@@ -22,8 +22,8 @@ from faervell_npc.services.v080_grounding import (
     foreign_script_violations,
     is_noise_gap,
     latest_world_clock_fact,
-    missing_fact_sentence,
     missing_facets,
+    missing_fact_sentence,
     normalize_gap_key,
     normalize_gap_question,
     pending_quest_violations,
@@ -493,7 +493,7 @@ def _install_behavior_scan() -> None:
     from faervell_npc.services.behavior import BehaviorManager
 
     async def scan(self: Any, session: Any, days: int = 30) -> dict[str, Any]:
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
         raw_gaps = (
             await session.execute(
                 select(KnowledgeGap).where(
@@ -618,7 +618,7 @@ def _install_behavior_scan() -> None:
                     if gap_id in resolved_ids and review.status == "PENDING":
                         review.status = "REJECTED"
                         review.decision_note = "Пробел автоматически закрыт: ответ уже найден в актуальном индексе"
-                        review.decided_at = datetime.now(timezone.utc)
+                        review.decided_at = datetime.now(UTC)
                         auto_closed_reviews += 1
                 continue
             record["first_created_at"] = record["first_created_at"].isoformat()
@@ -642,7 +642,7 @@ def _install_behavior_scan() -> None:
             latest[key] = max(created_at, latest.get(key, created_at))
 
         return {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "days": days,
             "pending_knowledge_gaps": unresolved,
             "gm_reviews_backfilled": gm_reviews_backfilled,

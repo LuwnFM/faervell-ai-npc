@@ -1,0 +1,589 @@
+{
+  "schema_version": "1.0",
+  "description": "32 типовых MMORPG-архетипа квестов Странника.",
+  "global_rules": [
+    "Не придумывать предметы, суммы, свойства, локации или результаты действий.",
+    "Использовать только переменные и факты из проверенного ActorPacket.",
+    "Не объявлять квест принятым, завершённым или проваленным без соответствующего action_result.",
+    "Сохранять спокойную, сдержанную и немного загадочную манеру Странника.",
+    "Не начинать насилие и по возможности предлагать несмертельное решение."
+  ],
+  "quest_types": [
+    {
+      "quest_type": "COLLECT_HERBS",
+      "profession_mask": "herbalist",
+      "title": "Сбор трав",
+      "objective_template": "собрать {quantity} ед. «{item_name}» в районе {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "COLLECT_MINERALS",
+      "profession_mask": "craftsman",
+      "title": "Сбор минералов",
+      "objective_template": "добыть {quantity} ед. «{item_name}» возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "COLLECT_WOOD",
+      "profession_mask": "craftsman",
+      "title": "Заготовка древесины",
+      "objective_template": "принести {quantity} ед. древесины «{item_name}» из {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "COLLECT_COMPONENTS",
+      "profession_mask": "collector",
+      "title": "Сбор компонентов",
+      "objective_template": "собрать {quantity} ед. компонента «{item_name}» в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "HUNT_BEAST",
+      "profession_mask": "hunter",
+      "title": "Охота на зверя",
+      "objective_template": "выследить и остановить зверя «{target_name}» возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "DRIVE_OFF_CREATURES",
+      "profession_mask": "guide",
+      "title": "Отогнать существ",
+      "objective_template": "отогнать существ «{target_name}» от {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "ELIMINATE_MONSTERS",
+      "profession_mask": "warden",
+      "title": "Устранение чудовищ",
+      "objective_template": "устранить угрозу «{target_name}» в районе {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "CAPTURE_TARGET",
+      "profession_mask": "warden",
+      "title": "Захват цели",
+      "objective_template": "найти и доставить живым «{target_name}» к {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "ESCORT_TRAVELER",
+      "profession_mask": "guide",
+      "title": "Сопровождение путника",
+      "objective_template": "сопроводить «{target_name}» до {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "ESCORT_CARAVAN",
+      "profession_mask": "guide",
+      "title": "Сопровождение каравана",
+      "objective_template": "провести караван «{target_name}» по маршруту {route_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "DELIVER_ITEM",
+      "profession_mask": "courier",
+      "title": "Доставка предмета",
+      "objective_template": "доставить «{item_name}» получателю «{target_name}» в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "DELIVER_MESSAGE",
+      "profession_mask": "courier",
+      "title": "Доставка послания",
+      "objective_template": "передать послание существу «{target_name}» в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "RECOVER_LOST_ITEM",
+      "profession_mask": "collector",
+      "title": "Возвращение утраченного",
+      "objective_template": "найти «{item_name}», потерянный возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "RECOVER_RELIC",
+      "profession_mask": "archivist",
+      "title": "Поиск реликвии",
+      "objective_template": "найти реликвию «{item_name}» в районе {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "RESCUE_PERSON",
+      "profession_mask": "guide",
+      "title": "Спасение",
+      "objective_template": "найти и вывести «{target_name}» из {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "FIND_MISSING",
+      "profession_mask": "guide",
+      "title": "Поиск пропавшего",
+      "objective_template": "разыскать «{target_name}», пропавшего возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "INVESTIGATE_PLACE",
+      "profession_mask": "archivist",
+      "title": "Исследование места",
+      "objective_template": "осмотреть {location_name} и собрать подтверждения",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "INVESTIGATE_RUMOR",
+      "profession_mask": "archivist",
+      "title": "Проверка слуха",
+      "objective_template": "проверить слух о «{target_name}» в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "SCOUT_ROUTE",
+      "profession_mask": "guide",
+      "title": "Разведка маршрута",
+      "objective_template": "проверить маршрут {route_name} до {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "MAP_AREA",
+      "profession_mask": "cartographer",
+      "title": "Картографирование",
+      "objective_template": "нанести на карту район {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "DEFEND_LOCATION",
+      "profession_mask": "warden",
+      "title": "Защита места",
+      "objective_template": "защитить {location_name} от угрозы «{target_name}»",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "GUARD_CARGO",
+      "profession_mask": "trader",
+      "title": "Охрана груза",
+      "objective_template": "сохранить груз «{item_name}» до прибытия в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "REPAIR_OBJECT",
+      "profession_mask": "craftsman",
+      "title": "Ремонт",
+      "objective_template": "починить объект «{target_name}» в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "CRAFT_ITEM",
+      "profession_mask": "craftsman",
+      "title": "Изготовление",
+      "objective_template": "изготовить {quantity} ед. предмета «{item_name}»",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "PREPARE_MEDICINE",
+      "profession_mask": "herbalist",
+      "title": "Приготовление лекарства",
+      "objective_template": "приготовить лекарство «{item_name}» для «{target_name}»",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "FISHING",
+      "profession_mask": "provisioner",
+      "title": "Рыбная заготовка",
+      "objective_template": "добыть {quantity} ед. «{item_name}» в водоёме {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "GATHER_FOOD",
+      "profession_mask": "provisioner",
+      "title": "Сбор припасов",
+      "objective_template": "собрать {quantity} ед. припасов «{item_name}» возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "CLEAR_ROAD",
+      "profession_mask": "guide",
+      "title": "Расчистка дороги",
+      "objective_template": "освободить путь {route_name} возле {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "ACTIVATE_PORTAL",
+      "profession_mask": "portal_keeper",
+      "title": "Активация портала",
+      "objective_template": "подготовить узел «{target_name}» в {location_name} к запуску",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "STABILIZE_ANOMALY",
+      "profession_mask": "portal_keeper",
+      "title": "Стабилизация аномалии",
+      "objective_template": "стабилизировать пространственную аномалию в {location_name}",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "TRADE_REQUEST",
+      "profession_mask": "trader",
+      "title": "Торговое поручение",
+      "objective_template": "обменять «{item_name}» на {exchange_item} у «{target_name}»",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    },
+    {
+      "quest_type": "LORE_EXCHANGE",
+      "profession_mask": "archivist",
+      "title": "Услуга за знание",
+      "objective_template": "выполнить условие «{exchange_condition}» ради сведений о «{target_name}»",
+      "allowed_states": [
+        "offer",
+        "accepted",
+        "reminder",
+        "progress_partial",
+        "blocked",
+        "completed",
+        "declined",
+        "failed"
+      ],
+      "reward_policy": "Награда приходит из проверенного ActorPacket.",
+      "violence_policy": "Предпочитать несмертельное решение."
+    }
+  ]
+}

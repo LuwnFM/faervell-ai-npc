@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from faervell_npc.schemas import QuestDraft
+from faervell_npc.services.template_library import TemplateLibrary
 
 
 @dataclass(slots=True)
@@ -22,11 +23,23 @@ class RuleEngine:
         "guide": {"FIND_LOCATION", "ESCORT", "INVESTIGATE"},
     }
 
+    def __init__(self, template_library: TemplateLibrary | None = None) -> None:
+        self.template_library = template_library or TemplateLibrary()
+
     def validate_quest(self, quest: QuestDraft, profession_mask_id: str) -> ValidationResult:
         errors: list[str] = []
         allowed = self.ALLOWED_TEMPLATES_BY_MASK.get(profession_mask_id, set())
-        if quest.template_id not in allowed:
+        library_allowed = self.template_library.is_quest_template_allowed(
+            quest.template_id,
+            profession_mask_id,
+        )
+        if quest.template_id not in allowed and not library_allowed:
             errors.append("profession_mask_cannot_issue_template")
+        if quest.quest_type and not self.template_library.is_quest_type_allowed(
+            quest.quest_type,
+            profession_mask_id,
+        ) and quest.template_id not in allowed:
+            errors.append("unknown_or_disallowed_quest_type")
         if quest.reward_amount > self.MAX_SMALL_QUEST_REWARD and not quest.gm_approval_required:
             errors.append("reward_exceeds_small_quest_limit")
         if not quest.evidence and not quest.gm_approval_required:
@@ -43,6 +56,12 @@ class RuleEngine:
             errors.append("objective_graph_has_cycle")
 
         high_risk = any(obj.type in {"ESCORT", "INVESTIGATE"} for obj in quest.objectives)
+        high_risk = high_risk or str(quest.quest_type or "").upper() in {
+            "CAPTURE_TARGET",
+            "DEFEND_LOCATION",
+            "ELIMINATE_MONSTERS",
+            "STABILIZE_ANOMALY",
+        }
         return ValidationResult(
             valid=not errors,
             errors=errors,

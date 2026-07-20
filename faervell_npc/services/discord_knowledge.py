@@ -6,7 +6,7 @@ import os
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import discord
@@ -330,7 +330,7 @@ async def _location_document(
     name = _clean_name(channel.name)
     path = _scene_path(channel)
     text = "\n\n".join(f"## {title}\n{body}" for title, body in sections)
-    latest = max((message.created_at for message in selected), default=datetime.now(timezone.utc))
+    latest = max((message.created_at for message in selected), default=datetime.now(UTC))
     return ImportedDocument(
         source_id=f"discord_location:{channel.id}",
         title=f"Локация: {path or name}",

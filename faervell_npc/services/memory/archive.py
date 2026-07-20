@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from faervell_npc.models import TravelerMemory
+from faervell_npc.models import TravelerCortexSnapshot, TravelerMemory
 
 from .enums import LifecycleStatus
 
@@ -31,4 +32,24 @@ class TravelerMemoryArchiveService:
         memory.lifecycle_status = status.value
         memory.updated_at = datetime.now(UTC)
         memory.metadata_json = {**(memory.metadata_json or {}), "lifecycle_reason": reason}
+        snapshot = (
+            await session.execute(
+                select(TravelerCortexSnapshot).where(
+                    TravelerCortexSnapshot.traveler_entity_id == memory.traveler_entity_id,
+                    TravelerCortexSnapshot.character_id == memory.character_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if snapshot is None:
+            session.add(
+                TravelerCortexSnapshot(
+                    traveler_entity_id=memory.traveler_entity_id,
+                    character_id=memory.character_id,
+                    dirty=True,
+                    dirty_reason=f"memory:{status.value.lower()}",
+                )
+            )
+        else:
+            snapshot.dirty = True
+            snapshot.dirty_reason = f"memory:{status.value.lower()}"
         return memory

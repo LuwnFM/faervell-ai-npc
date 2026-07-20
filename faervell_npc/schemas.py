@@ -137,6 +137,7 @@ class ToolRequest(BaseModel):
         "create_quest_draft",
         "validate_quest",
         "commit_quest",
+        "advance_quest",
         "create_admin_question",
         "create_gm_review",
     ]
@@ -169,6 +170,8 @@ class QuestObjectiveDraft(BaseModel):
 class QuestDraft(BaseModel):
     title: str
     template_id: str
+    quest_type: str | None = None
+    template_event: str = "offer"
     description: str = ""
     location_name: str | None = None
     objectives: list[QuestObjectiveDraft] = Field(min_length=1, max_length=8)

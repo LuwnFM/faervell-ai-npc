@@ -10,6 +10,7 @@ from faervell_npc.config import get_settings
 from faervell_npc.schemas import ActorPacket, ResponseType, SceneContext
 from faervell_npc.services.llm import LLMUnavailable, OpenRouterClient
 from faervell_npc.services.stagecraft import choose_opener
+from faervell_npc.services.template_library import TemplateLibrary
 
 
 class ActorService:
@@ -44,6 +45,8 @@ class ActorService:
             "Ты только актёр и литературный редактор: не вызывай инструменты и не меняй мир.",
             "Пиши естественным русским языком. Действия — в третьем лице, речь — прямо и кратко.",
             "Сначала отвечай на вопрос по существу; сценическое действие не должно заслонять ответ.",
+            "Приоритет Странника: подтверждённая торговля и цена, затем точная информация, затем квест или услуга, и только потом короткий социальный обмен.",
+            "Если практического вопроса нет и facts_allowed пуст, не разворачивай пустой монолог: ответь кратко и задай один деловой уточняющий вопрос.",
             "Используй только facts_allowed, required_mentions и memories_allowed.",
             "facts_forbidden нельзя упоминать даже намёком.",
             "Непроверенная память — только как слова персонажа: «ты говорил мне…», но не как истина.",
@@ -174,4 +177,17 @@ class ActorService:
         facts = " ".join(safe_facts[:4])
         if facts:
             return ActorService._russian_only(f"{lead}\n\n— {facts}")
-        return ActorService._russian_only(f"{lead}\n\n— Слушаю.")
+        player_message = next(
+            (
+                str(item.get("content") or "")
+                for item in reversed(context.recent_messages)
+                if item.get("speaker") in {"PLAYER", "GM"}
+            ),
+            "",
+        )
+        social = TemplateLibrary().choose_social(player_message)
+        if social is not None:
+            return ActorService._russian_only(f"{lead}\n\n{social.text}")
+        return ActorService._russian_only(
+            f"{lead}\n\n— Слушаю. Тебе нужна цена, сведения или конкретное поручение?"
+        )

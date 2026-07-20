@@ -9,7 +9,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-
 EXPECTED_PERSONA_SHA256 = "8085ffda1caf7b687fbeebe5c32cdf12a0925cb8c14fe5f19b4118d37d11a7e6"
 
 
@@ -34,6 +33,14 @@ def main() -> None:
         "data/economy/economy.sqlite3",
         "data/economy/manifest.json",
         "data/fandom-api-audit.json",
+        "behavior-pack/template-library/templates.stranger.jsonl",
+        "behavior-pack/template-library/quest_archetypes.stranger.json",
+        "behavior-pack/template-library/audit.json",
+        "behavior-pack/template-library/operational.stranger.jsonl",
+        "docs/v1.0.0-function-audit.md",
+        "docs/v1.0.0-pdf-compliance.md",
+        "faervell_npc/services/memory/testimony.py",
+        "faervell_npc/services/memory/relations.py",
     ]
     for relative in required:
         require((root / relative).exists(), f"не найден {relative}")
@@ -45,6 +52,9 @@ def main() -> None:
         "faervell_npc/services/memory/__init__.py",
         "faervell_npc/services/memory/cortex.py",
         "faervell_npc/services/memory/writer.py",
+        "faervell_npc/services/template_library.py",
+        "faervell_npc/services/quests.py",
+        "faervell_npc/api.py",
     ):
         path = root / relative
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -86,6 +96,12 @@ def main() -> None:
     passed = {keyword.arg for keyword in call.keywords if keyword.arg}
     require(not (passed - accepted), f"unknown orchestrator arguments: {sorted(passed - accepted)}")
     require("_character_registry_loop" in bot, "periodic character registry sync is missing")
+    require("release_startup_lock_and_roll" in bot or "release_startup_lock_and_roll" in runtime, "startup-lock release flow is missing")
+    require("startup_lock_released" in (root / "faervell_npc/models.py").read_text(encoding="utf-8"), "startup-lock release state is missing")
+    require("advance_quest" in (root / "faervell_npc/schemas.py").read_text(encoding="utf-8"), "server-authoritative quest transition tool is missing")
+    require("TravelerTestimonyContextService" in (root / "faervell_npc/services/memory/testimony.py").read_text(encoding="utf-8"), "testimony context service is missing")
+    require("_claim_action" in (root / "faervell_npc/api.py").read_text(encoding="utf-8"), "claim admin routes are missing")
+    require("/internal/cortex/{character_id}/preview" in (root / "faervell_npc/api.py").read_text(encoding="utf-8"), "cortex preview route is missing")
     require("migrate-v1.0.0.sh" in deploy, "production migration is not connected")
     require("docker compose down -v" not in deploy, "production volumes would be deleted")
     require(len(re.findall(r"@stranger\.command\(", bot)) <= 25, "Discord command group exceeds 25 subcommands")
@@ -99,6 +115,17 @@ def main() -> None:
     finally:
         connection.close()
     require(economy_count == 144768, "economy index is incomplete")
+
+    template_audit = json.loads(
+        (root / "behavior-pack/template-library/audit.json").read_text(encoding="utf-8")
+    )
+    require(template_audit.get("total") == 500, "template library is incomplete")
+    counts = template_audit.get("status_counts") or {}
+    require(counts.get("APPROVED_PERSONA") == 370, "approved template count changed")
+    require(counts.get("REVIEW_ACTION_RESULT") == 130, "guarded template count changed")
+    require(not template_audit.get("rejected_ids"), "persona-incompatible templates are active")
+    operational = (root / "behavior-pack/template-library/operational.stranger.jsonl").read_text(encoding="utf-8").splitlines()
+    require(len([line for line in operational if line.strip()]) == 12, "operational identity templates are incomplete")
 
     fandom = json.loads((root / "data/fandom-api-audit.json").read_text(encoding="utf-8"))
     require(fandom.get("status") == "OK", "Fandom API audit failed")

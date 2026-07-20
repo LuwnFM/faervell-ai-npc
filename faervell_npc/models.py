@@ -125,6 +125,7 @@ class TravelerPresence(Base):
     event_locations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     movement_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     locked_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    startup_lock_released: Mapped[bool] = mapped_column(Boolean, default=False)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_scene_engaged_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -329,6 +330,7 @@ class MemoryClaim(Base):
     confirmation_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     contradiction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     reinforcement_count: Mapped[int] = mapped_column(Integer, default=0)
+    corroboration_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     version: Mapped[int] = mapped_column(Integer, default=1)

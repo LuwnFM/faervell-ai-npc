@@ -133,4 +133,4 @@ def test_full_persona_is_installed() -> None:
 def test_trusted_author_chat_is_not_news_continuation() -> None:
     assert not _is_world_news_continuation("Всегда рад, сэр")
     assert not _is_world_news_continuation("Скинь хуй.")
-    assert _is_world_news_continuation(("Брейвенгейт: обвал нижних уровней\n" + "Подтверждённое описание события. " * 30))
+    assert _is_world_news_continuation("Брейвенгейт: обвал нижних уровней\n" + "Подтверждённое описание события. " * 30)

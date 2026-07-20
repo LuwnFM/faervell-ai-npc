@@ -21,7 +21,15 @@ def compare_claims(
     right_trust: str,
     left_dates: list[str] | None = None,
     right_dates: list[str] | None = None,
+    lexical_threshold: float | None = None,
 ) -> DuplicateDecision:
+    incompatible_pairs = (
+        {"PLAYER_SAID", "CONFIRMED"},
+        {"OBSERVED", "RUMOR"},
+        {"OBSERVED", "CORROBORATED_RUMOR"},
+    )
+    if {left_trust, right_trust} in incompatible_pairs:
+        return DuplicateDecision(False, conflict=True, reason="trust_scope_conflict")
     if normalize_text(left) == normalize_text(right):
         return DuplicateDecision(True, score=1.0, reason="normalized_claim_equal")
     score = lexical_similarity(left, right)
@@ -31,4 +39,5 @@ def compare_claims(
         return DuplicateDecision(False, conflict=True, score=score, reason="polarity_conflict")
     if left_trust != right_trust and {left_trust, right_trust} >= {"CONFIRMED", "RUMOR"}:
         return DuplicateDecision(False, conflict=True, score=score, reason="trust_scope_conflict")
-    return DuplicateDecision(score >= 0.90, score=score, reason="lexical_similarity")
+    threshold = 0.90 if lexical_threshold is None else lexical_threshold
+    return DuplicateDecision(score >= threshold, score=score, reason="lexical_similarity")

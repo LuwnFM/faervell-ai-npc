@@ -14,6 +14,7 @@ from faervell_npc.schemas import (
     SceneContext,
     ToolRequest,
 )
+from faervell_npc.services.template_library import TemplateLibrary
 from faervell_npc.services.tools import ToolExecutor
 
 
@@ -49,9 +50,10 @@ class LocalPlanner:
         "регион",
     }
 
-    def __init__(self, tools: ToolExecutor) -> None:
+    def __init__(self, tools: ToolExecutor, templates: TemplateLibrary | None = None) -> None:
         self.tools = tools
         self.settings = get_settings()
+        self.templates = templates or TemplateLibrary()
 
     async def try_handle(
         self,
@@ -163,6 +165,7 @@ class LocalPlanner:
             player_message=player_message,
             destination=destination,
             evidence_ids=[hit.id for hit in relevant_hits[:3]],
+            profession_mask_id=context.profession_mask_id,
         )
         committed = await self.tools.execute(
             session,
@@ -266,30 +269,58 @@ class LocalPlanner:
         player_message: str,
         destination: str,
         evidence_ids: list[str],
+        profession_mask_id: str = "traveler",
     ) -> QuestDraft:
         destination = self._clean_location(destination)
         lowered = player_message.casefold()
-        if any(token in lowered for token in ("развед", "проверь", "дорог", "путь", "перевал")):
-            title = f"Разведать путь к {destination}"
+        templates = getattr(self, "templates", None) or TemplateLibrary()
+        template_record = templates.choose_offer(
+            player_message=player_message,
+            profession_mask_id=profession_mask_id,
+            available_variables={"location_name", "quantity", "quest_title", "next_step"},
+        )
+        quest_type = (template_record.quest_type if template_record else None) or "INVESTIGATE_PLACE"
+        archetype = templates.quest_archetype(quest_type)
+        base_title = str(
+            (template_record.quest_archetype_title if template_record else None)
+            or archetype.get("title")
+            or f"Поручение в {destination}"
+        )
+        title = base_title if destination.casefold() in base_title.casefold() else f"{base_title}: {destination}"
+        objective_type = templates.objective_type(quest_type)
+        objective = QuestObjectiveDraft(
+            id=self._objective_id(quest_type),
+            type=objective_type,  # type: ignore[arg-type]
+            quantity=1,
+        )
+        if quest_type == "SCOUT_ROUTE":
             description = (
                 f"Добраться до подступов к {destination}, проверить проходимость дороги и "
                 "вернуться с кратким описанием опасных участков."
             )
-            template = "FIND_LOCATION"
-            objective = QuestObjectiveDraft(id="route", type="FIND_LOCATION", quantity=1)
-        else:
-            title = f"Доставить запечатанный пакет в {destination}"
+        elif quest_type in {"INVESTIGATE_PLACE", "INVESTIGATE_RUMOR", "MAP_AREA"}:
             description = (
-                f"Донести запечатанный дорожный пакет до безопасного места в {destination} "
-                "и вернуться с подтверждением передачи."
+                f"Осмотреть район {destination}, отделить наблюдаемые факты от слухов и "
+                "вернуться с проверяемым описанием результата."
             )
-            template = "DELIVER_ITEM"
-            objective = QuestObjectiveDraft(id="delivery", type="DELIVER", quantity=1)
+        elif quest_type == "COLLECT_HERBS" and "трав" in lowered:
+            description = f"Собрать указанные в подтверждённых условиях травы в районе {destination}."
+        elif quest_type in {"DELIVER_ITEM", "DELIVER_MESSAGE"} and any(
+            token in lowered for token in ("достав", "передач", "посыл", "сообщен")
+        ):
+            description = f"Передать подтверждённый груз или послание в безопасной точке {destination}."
+        else:
+            description = (
+                f"Выполнить проверяемое поручение типа «{quest_type}» в районе {destination}; "
+                "точные предметы и награда фиксируются только после подтверждения условий."
+            )
         reward = self.settings.quest_default_reward_amount
         currency = self.settings.quest_default_reward_currency
         return QuestDraft(
             title=title,
-            template_id=template,
+            template_id=(template_record.id if template_record else "INVESTIGATE_PLACE"),
+            quest_type=quest_type,
+            template_event="offer",
             description=description,
             location_name=destination,
             objectives=[objective],
@@ -300,6 +331,10 @@ class LocalPlanner:
             gm_approval_required=True,
             evidence=evidence_ids,
         )
+
+    @staticmethod
+    def _objective_id(quest_type: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", quest_type.casefold()).strip("_") or "objective"
 
     @staticmethod
     def _best_active_quest(quests: list[dict[str, object]]) -> dict[str, object]:

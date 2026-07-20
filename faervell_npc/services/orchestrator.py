@@ -90,6 +90,12 @@ class StrangerOrchestrator:
 
         context = await self.contexts.build(session, incoming, scene, character_id, character_name)
         route = self.router.decide(incoming.content, has_active_quest=bool(context.active_quests))
+        context = await self.contexts.refresh_memory_context(
+            session,
+            context,
+            query=incoming.content,
+            route=route.route.value,
+        )
 
         packet: ActorPacket
         planner_model: str | None = None
@@ -373,6 +379,8 @@ class StrangerOrchestrator:
             profession_mask_id=scene.profession_mask_id,
             message_id=incoming.discord_message_id,
             content=incoming.content,
+            guild_id=incoming.guild_id,
+            speaker_display_name=incoming.author_display_name,
             scene_id=scene.scene_id,
             location_id=scene.location_id,
             referenced_message_id=incoming.referenced_message_id,

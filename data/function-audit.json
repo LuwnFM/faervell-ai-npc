@@ -1,0 +1,1106 @@
+{
+  "schema_version": "1.0.0",
+  "baseline": "ffac60a",
+  "baseline_function_count": 347,
+  "current_function_count": 471,
+  "retained_function_names": 339,
+  "retention_ratio": 0.9769,
+  "intentional_replacements": {
+    "faervell_npc/services/memory.py": {
+      "replacement": "faervell_npc/services/memory/",
+      "reason": "Memory v2 splits the old monolith into Cortex, recall, claims, testimony, graph and disclosure services."
+    }
+  },
+  "files": [
+    {
+      "file": "faervell_npc/api.py",
+      "baseline_functions": 4,
+      "current_functions": 18,
+      "retained_names": [
+        "create_app",
+        "health",
+        "lifespan",
+        "ready"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "_claim_action",
+        "_claim_handler",
+        "_handler",
+        "_internal_memory",
+        "_memory_action",
+        "claim_detail",
+        "claim_evidence",
+        "cortex_detail",
+        "cortex_preview",
+        "cortex_rebuild",
+        "cortex_reset",
+        "memory_detail",
+        "memory_for_character",
+        "memory_patch"
+      ]
+    },
+    {
+      "file": "faervell_npc/cli.py",
+      "baseline_functions": 10,
+      "current_functions": 10,
+      "retained_names": [
+        "behavior_apply",
+        "behavior_rollback",
+        "behavior_scan",
+        "behavior_validate",
+        "decision_approve",
+        "decision_list",
+        "decision_reject",
+        "ingest",
+        "init_database",
+        "runner"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/config.py",
+      "baseline_functions": 8,
+      "current_functions": 8,
+      "retained_names": [
+        "effective_actor_models",
+        "effective_planner_models",
+        "filter_allowed_models",
+        "get_settings",
+        "llm_enabled",
+        "parse_csv",
+        "parse_optional_int",
+        "parse_reasoning_effort"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/db.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "close_db",
+        "get_session",
+        "init_db"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/discord_bot.py",
+      "baseline_functions": 69,
+      "current_functions": 70,
+      "retained_names": [
+        "__init__",
+        "_announce_arrival",
+        "_arrival_text",
+        "_automatic_destination_ids",
+        "_bootstrap_character_registry",
+        "_bootstrap_knowledge",
+        "_channel_category_id",
+        "_channel_is_automatic_scope",
+        "_channel_postability",
+        "_is_gm",
+        "_location_channels",
+        "_location_hierarchy",
+        "_member_is_gm",
+        "_post_gm_review",
+        "_presence_loop",
+        "_quest_decision_text",
+        "_reply_belongs_to_current_visit",
+        "_reply_parts",
+        "_require_gm",
+        "_response_parts",
+        "_restore_persistent_views",
+        "_retry_pending_gm_reviews",
+        "_send_process_result",
+        "_slug",
+        "_split_message",
+        "_with_sources",
+        "appear_now",
+        "appearance_chance",
+        "approve_callback",
+        "arrival_announcements",
+        "behavior_scan",
+        "character_bind",
+        "characters_sync",
+        "close",
+        "commands_sync",
+        "cross_location_summons",
+        "decide_gm_review",
+        "dislike_callback",
+        "event_locations",
+        "gm_channel",
+        "identity_reset",
+        "knowledge_status",
+        "like_callback",
+        "locations_sync",
+        "mask_set",
+        "move_here",
+        "movement_lock",
+        "on_message",
+        "on_ready",
+        "permissions",
+        "progress",
+        "rate_callback",
+        "record_response_feedback",
+        "regenerate_callback",
+        "regenerate_response",
+        "regeneration_limit",
+        "reject_callback",
+        "reply_hint",
+        "scene_disable",
+        "scene_enable",
+        "setup_hook",
+        "source_ingest",
+        "startup_lock_status",
+        "status",
+        "stranger_sync_prefix",
+        "sync_application_commands",
+        "sync_character_registry",
+        "sync_location_scenes",
+        "travel_clear"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "_character_registry_loop"
+      ]
+    },
+    {
+      "file": "faervell_npc/main.py",
+      "baseline_functions": 1,
+      "current_functions": 1,
+      "retained_names": [
+        "run"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/models.py",
+      "baseline_functions": 2,
+      "current_functions": 2,
+      "retained_names": [
+        "utcnow",
+        "uuid4_str"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/runtime.py",
+      "baseline_functions": 2,
+      "current_functions": 2,
+      "retained_names": [
+        "build_runtime",
+        "close"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/actor.py",
+      "baseline_functions": 5,
+      "current_functions": 5,
+      "retained_names": [
+        "__init__",
+        "_public_packet",
+        "_russian_only",
+        "fallback",
+        "render"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/behavior.py",
+      "baseline_functions": 7,
+      "current_functions": 7,
+      "retained_names": [
+        "__init__",
+        "apply_patch",
+        "current_version",
+        "export_scan",
+        "rollback",
+        "scan",
+        "validate_patch"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/cache.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "__init__",
+        "close",
+        "lock"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/characters.py",
+      "baseline_functions": 25,
+      "current_functions": 27,
+      "retained_names": [
+        "__init__",
+        "_active_identity",
+        "_appearance",
+        "_best_match",
+        "_clean",
+        "_digest",
+        "_dot",
+        "_field",
+        "_meaningful",
+        "_parse_height_cm",
+        "_pending_id",
+        "_provisional_id",
+        "_set_active_identity",
+        "_split_aliases",
+        "_unique",
+        "clean_presented_name",
+        "count_profiles",
+        "deactivate_missing",
+        "extract_presentation",
+        "find_manual_binding",
+        "normalize_name",
+        "parse",
+        "reset_identity",
+        "resolve",
+        "upsert_profile"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "_parse_all_fields",
+        "flush"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/context.py",
+      "baseline_functions": 5,
+      "current_functions": 6,
+      "retained_names": [
+        "__init__",
+        "_interaction_guidance",
+        "build",
+        "ensure_scene",
+        "resolve_character"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "refresh_memory_context"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/decision_cache.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "fingerprint",
+        "get_approved",
+        "store_candidate"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/disclosure.py",
+      "baseline_functions": 2,
+      "current_functions": 2,
+      "retained_names": [
+        "_safe_summary",
+        "decide"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/discord_knowledge.py",
+      "baseline_functions": 22,
+      "current_functions": 22,
+      "retained_names": [
+        "_clean_message",
+        "_clean_name",
+        "_collect_threads",
+        "_create_source_review",
+        "_extract_world_date_label",
+        "_forum_container_document",
+        "_is_location_lore_message",
+        "_is_structured_world_news",
+        "_is_world_news_continuation",
+        "_location_containers",
+        "_location_document",
+        "_scene_path",
+        "_slug",
+        "_split_news_sections",
+        "_store",
+        "_sync_container",
+        "_sync_world_news",
+        "_upsert_scene",
+        "as_dict",
+        "bounded",
+        "emit",
+        "sync_discord_knowledge"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/economy.py",
+      "baseline_functions": 0,
+      "current_functions": 3,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "_search_sync",
+        "search_prices"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/embeddings.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "__init__",
+        "embed",
+        "get_embedder"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/examples.py",
+      "baseline_functions": 4,
+      "current_functions": 4,
+      "retained_names": [
+        "__init__",
+        "_cosine",
+        "_reload_if_needed",
+        "search"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/guard.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "_looks_incomplete",
+        "_numbers",
+        "validate"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/ingest.py",
+      "baseline_functions": 22,
+      "current_functions": 22,
+      "retained_names": [
+        "__init__",
+        "_chunk_text",
+        "_document_from_revision_page",
+        "_fandom_api_url",
+        "_fetch_fandom_parse",
+        "_infer_corpus",
+        "_infer_tier",
+        "_load_fandom",
+        "_load_fandom_page",
+        "_load_url",
+        "_mediawiki_json",
+        "_modes_for_tier",
+        "_normalise_title",
+        "_sections_from_html",
+        "_sections_from_plaintext",
+        "_sections_from_wikitext",
+        "_title_from_fandom_url",
+        "close",
+        "ingest_manifest",
+        "load_spec",
+        "probe_fandom",
+        "store_document"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/knowledge.py",
+      "baseline_functions": 9,
+      "current_functions": 9,
+      "retained_names": [
+        "__init__",
+        "_direct_chunk_score",
+        "_expand_query",
+        "_query_terms",
+        "_title_qualifiers",
+        "diagnostics",
+        "fetch_direct",
+        "search",
+        "search_world"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/llm.py",
+      "baseline_functions": 14,
+      "current_functions": 14,
+      "retained_names": [
+        "__init__",
+        "_attempt_model",
+        "_blocked",
+        "_catalog_allowed",
+        "_content_text",
+        "_float",
+        "_headers",
+        "_load_catalog",
+        "_parse_schema",
+        "_price_per_million",
+        "_redact_body",
+        "chat",
+        "close",
+        "resolve_models"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/local_planner.py",
+      "baseline_functions": 11,
+      "current_functions": 12,
+      "retained_names": [
+        "__init__",
+        "_best_active_quest",
+        "_build_quest",
+        "_clean_location",
+        "_grounded_local_quest",
+        "_meaningful_tokens",
+        "_quest_evidence_is_relevant",
+        "_quest_facts",
+        "_requested_destination",
+        "_review_only_packet",
+        "try_handle"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "_objective_id"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory.py",
+      "baseline_functions": 8,
+      "current_functions": 0,
+      "retained_names": [],
+      "removed_names": [
+        "__init__",
+        "archive_message",
+        "extract_local_memories",
+        "get_or_create_relationship",
+        "recent_messages",
+        "register_interaction",
+        "relationship_summary",
+        "retrieve"
+      ],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/memory/__init__.py",
+      "baseline_functions": 0,
+      "current_functions": 13,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "_mentioned_profiles",
+        "_world_entity_keys",
+        "archive_message",
+        "build_cortex_context",
+        "extract_local_memories",
+        "get_or_create_relationship",
+        "recent_messages",
+        "record_testimony",
+        "register_interaction",
+        "relationship_summary",
+        "resolve_open_thread",
+        "retrieve"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/archive.py",
+      "baseline_functions": 0,
+      "current_functions": 4,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "_set",
+        "archive",
+        "redact",
+        "restore"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/config.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "get_memory_config"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/cortex.py",
+      "baseline_functions": 0,
+      "current_functions": 7,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "ensure_snapshot",
+        "get_context",
+        "get_snapshot",
+        "mark_dirty",
+        "rebuild",
+        "reset_generated_sections"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/cortex_builder.py",
+      "baseline_functions": 0,
+      "current_functions": 4,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "_memory_digest",
+        "identity_core",
+        "rebuild_snapshot"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/cortex_renderer.py",
+      "baseline_functions": 0,
+      "current_functions": 2,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "_fit_items",
+        "render"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/deduplication.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "compare_claims"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/disclosure.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "can_disclose"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/graph.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "link"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/ranking.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "rank_items"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/recall.py",
+      "baseline_functions": 0,
+      "current_functions": 4,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "recall",
+        "recall_testimonies",
+        "to_item"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/schemas.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "usable_tokens"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/testimony.py",
+      "baseline_functions": 0,
+      "current_functions": 2,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "get_relevant_testimonies"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/text.py",
+      "baseline_functions": 0,
+      "current_functions": 7,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "compact_sentences",
+        "content_hash",
+        "estimate_tokens",
+        "join_unique",
+        "lexical_similarity",
+        "normalize_text",
+        "tokens"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/memory/writer.py",
+      "baseline_functions": 0,
+      "current_functions": 9,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "anchor",
+        "cherish",
+        "create_open_thread",
+        "mark_cortex_dirty",
+        "record",
+        "record_testimony",
+        "resolve_open_thread",
+        "update_importance"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/orchestrator.py",
+      "baseline_functions": 15,
+      "current_functions": 15,
+      "retained_names": [
+        "__init__",
+        "_archive_incoming",
+        "_chat_packet",
+        "_create_gap",
+        "_gm_review_id",
+        "_identity_required_result",
+        "_lore_packet",
+        "_mechanics_packet",
+        "_memory_for_actor",
+        "_processed_result",
+        "_source_fact",
+        "archive_only",
+        "process",
+        "record_outgoing",
+        "regenerate"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/planner.py",
+      "baseline_functions": 10,
+      "current_functions": 10,
+      "retained_names": [
+        "__init__",
+        "_content_tokens",
+        "_enforce_plan_risk",
+        "_finalize",
+        "_ground_packet",
+        "_pending_quest_packet",
+        "_planning_prompt",
+        "_within_daily_budget",
+        "plan_and_execute",
+        "safe_packet"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/presence.py",
+      "baseline_functions": 16,
+      "current_functions": 20,
+      "retained_names": [
+        "__init__",
+        "_apply_current_scene",
+        "_clear_current",
+        "_clear_next",
+        "_weighted_choice",
+        "assess_cross_location_ping",
+        "clear_destination",
+        "enforce_startup_lock",
+        "ensure_presence",
+        "is_current_scene",
+        "register_cross_location_ping",
+        "set_current_scene",
+        "set_event_locations_enabled",
+        "set_movement_lock",
+        "set_summons_enabled",
+        "tick"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "_automatic_scenes",
+        "finish_current_scene",
+        "release_startup_lock_and_roll",
+        "touch_current_scene"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/quests.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "advance"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/router.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "_contains_any",
+        "_rules",
+        "decide"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/rules.py",
+      "baseline_functions": 3,
+      "current_functions": 4,
+      "retained_names": [
+        "_has_cycle",
+        "validate_quest",
+        "visit"
+      ],
+      "removed_names": [],
+      "added_names": [
+        "__init__"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/stagecraft.py",
+      "baseline_functions": 3,
+      "current_functions": 3,
+      "retained_names": [
+        "arrival_activity",
+        "choose_activity",
+        "choose_opener"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/template_library.py",
+      "baseline_functions": 0,
+      "current_functions": 14,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "__init__",
+        "_mask_matches",
+        "_reload_if_needed",
+        "all",
+        "choose_offer",
+        "choose_social",
+        "from_dict",
+        "get",
+        "is_quest_template_allowed",
+        "is_quest_type_allowed",
+        "objective_type",
+        "quest_archetype",
+        "render_template_text",
+        "score"
+      ]
+    },
+    {
+      "file": "faervell_npc/services/tools.py",
+      "baseline_functions": 7,
+      "current_functions": 7,
+      "retained_names": [
+        "__init__",
+        "_create_review_request",
+        "_deterministic_weather",
+        "_required_str",
+        "_validate_evidence",
+        "execute",
+        "execute_all"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/v080_grounding.py",
+      "baseline_functions": 23,
+      "current_functions": 23,
+      "retained_names": [
+        "_claim_stems",
+        "_extract_query_entities",
+        "_fold",
+        "_unique",
+        "covered_facets",
+        "extract_disclosable_tool_facts",
+        "extract_tool_evidence",
+        "foreign_script_violations",
+        "is_noise_gap",
+        "latest_world_clock_fact",
+        "missing_facets",
+        "missing_fact_sentence",
+        "normalize_gap_key",
+        "normalize_gap_question",
+        "pending_quest_violations",
+        "repair_actor_packet",
+        "requested_facets",
+        "safe_evidence",
+        "sanitize_candidate_titles",
+        "scrub_model_error",
+        "ungrounded_lore_claim_violations",
+        "ungrounded_lore_violations",
+        "walk"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "faervell_npc/services/v080_runtime.py",
+      "baseline_functions": 20,
+      "current_functions": 20,
+      "retained_names": [
+        "_install_actor_policy",
+        "_install_behavior_scan",
+        "_install_character_presentation",
+        "_install_local_quest_policy",
+        "_install_mask_neutral_quests",
+        "_install_output_grounding",
+        "_install_partial_lore",
+        "_install_planner_repair",
+        "build_quest",
+        "create_gap",
+        "extract_presentation",
+        "finalize",
+        "grounded_local_quest",
+        "install_v080_runtime",
+        "lore_packet",
+        "pending_packet",
+        "render",
+        "scan",
+        "validate",
+        "validate_quest"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "scripts/audit_function_coverage.py",
+      "baseline_functions": 0,
+      "current_functions": 7,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "baseline_source",
+        "build_report",
+        "function_names",
+        "git_lines",
+        "iter_python_files",
+        "main",
+        "write_markdown"
+      ]
+    },
+    {
+      "file": "scripts/build_economy_index.py",
+      "baseline_functions": 0,
+      "current_functions": 1,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "main"
+      ]
+    },
+    {
+      "file": "scripts/extract_discord_rp.py",
+      "baseline_functions": 0,
+      "current_functions": 4,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "_contains",
+        "is_rp_candidate",
+        "iter_candidates",
+        "main"
+      ]
+    },
+    {
+      "file": "scripts/import_faervell_economy.py",
+      "baseline_functions": 0,
+      "current_functions": 11,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "_soup",
+        "country_from_intro",
+        "csv_rows",
+        "discover_linked_workbooks",
+        "discover_tabs",
+        "extract_workbook",
+        "fetch",
+        "header_index",
+        "main",
+        "nonempty",
+        "normalize_item"
+      ]
+    },
+    {
+      "file": "scripts/import_stranger_template_library.py",
+      "baseline_functions": 0,
+      "current_functions": 4,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "_audit",
+        "import_library",
+        "main",
+        "write_jsonl"
+      ]
+    },
+    {
+      "file": "scripts/verify-v0.8.0.py",
+      "baseline_functions": 2,
+      "current_functions": 2,
+      "retained_names": [
+        "main",
+        "require"
+      ],
+      "removed_names": [],
+      "added_names": []
+    },
+    {
+      "file": "scripts/verify-v1.0.0.py",
+      "baseline_functions": 0,
+      "current_functions": 2,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "main",
+        "require"
+      ]
+    },
+    {
+      "file": "scripts/verify_fandom_api.py",
+      "baseline_functions": 0,
+      "current_functions": 3,
+      "retained_names": [],
+      "removed_names": [],
+      "added_names": [
+        "fetch_pages",
+        "fetch_stats",
+        "main"
+      ]
+    }
+  ],
+  "diff_status": [
+    "M\t.env.example",
+    "M\t.gitignore",
+    "M\tREADME.md",
+    "M\tbehavior-pack/version.json",
+    "A\tdata/economy/README.md",
+    "A\tdata/economy/manifest.json",
+    "A\tdata/fandom-api-audit.json",
+    "M\tdata/sources.yaml",
+    "A\tdata/world/map_notes.txt",
+    "A\tdata/world/maps.json",
+    "M\tdocker-compose.yml",
+    "A\tdocs/v1.0.0-release.md",
+    "A\texternal-sources/Mimir-COMMIT.txt",
+    "A\texternal-sources/PersonaUI-COMMIT.txt",
+    "A\texternal-sources/snapshots/mimir/constants.py",
+    "A\texternal-sources/snapshots/mimir/core.py",
+    "A\texternal-sources/snapshots/mimir/helpers.py",
+    "A\texternal-sources/snapshots/mimir/models.py",
+    "A\texternal-sources/snapshots/mimir/persistence_mixin.py",
+    "A\texternal-sources/snapshots/mimir/recall_mixin.py",
+    "A\texternal-sources/snapshots/mimir/write_mixin.py",
+    "A\texternal-sources/snapshots/mimir/yggdrasil_mixin.py",
+    "A\texternal-sources/snapshots/personaui/cortex_routes.py",
+    "A\texternal-sources/snapshots/personaui/cortex_service.py",
+    "A\texternal-sources/snapshots/personaui/tier_checker.py",
+    "A\texternal-sources/snapshots/personaui/tier_tracker.py",
+    "A\texternal-sources/snapshots/personaui/update_service.py",
+    "M\tfaervell_npc/__init__.py",
+    "M\tfaervell_npc/api.py",
+    "M\tfaervell_npc/config.py",
+    "M\tfaervell_npc/db.py",
+    "M\tfaervell_npc/discord_bot.py",
+    "M\tfaervell_npc/models.py",
+    "M\tfaervell_npc/runtime.py",
+    "M\tfaervell_npc/schemas.py",
+    "M\tfaervell_npc/services/actor.py",
+    "M\tfaervell_npc/services/characters.py",
+    "M\tfaervell_npc/services/context.py",
+    "A\tfaervell_npc/services/economy.py",
+    "M\tfaervell_npc/services/guard.py",
+    "M\tfaervell_npc/services/ingest.py",
+    "D\tfaervell_npc/services/memory.py",
+    "A\tfaervell_npc/services/memory/__init__.py",
+    "A\tfaervell_npc/services/memory/archive.py",
+    "A\tfaervell_npc/services/memory/claims.py",
+    "A\tfaervell_npc/services/memory/config.py",
+    "A\tfaervell_npc/services/memory/cortex.py",
+    "A\tfaervell_npc/services/memory/cortex_builder.py",
+    "A\tfaervell_npc/services/memory/cortex_renderer.py",
+    "A\tfaervell_npc/services/memory/deduplication.py",
+    "A\tfaervell_npc/services/memory/disclosure.py",
+    "A\tfaervell_npc/services/memory/enums.py",
+    "A\tfaervell_npc/services/memory/graph.py",
+    "A\tfaervell_npc/services/memory/open_threads.py",
+    "A\tfaervell_npc/services/memory/ranking.py",
+    "A\tfaervell_npc/services/memory/recall.py",
+    "A\tfaervell_npc/services/memory/schemas.py",
+    "A\tfaervell_npc/services/memory/testimony.py",
+    "A\tfaervell_npc/services/memory/text.py",
+    "A\tfaervell_npc/services/memory/writer.py",
+    "M\tfaervell_npc/services/orchestrator.py",
+    "M\tfaervell_npc/services/presence.py",
+    "M\tfaervell_npc/services/tools.py",
+    "M\tpyproject.toml",
+    "A\tscripts/build_economy_index.py",
+    "M\tscripts/deploy-production.sh",
+    "A\tscripts/extract_discord_rp.py",
+    "A\tscripts/import_faervell_economy.py",
+    "A\tscripts/migrate-v1.0.0.sh",
+    "A\tscripts/verify-v1.0.0.py",
+    "A\tscripts/verify_fandom_api.py"
+  ]
+}

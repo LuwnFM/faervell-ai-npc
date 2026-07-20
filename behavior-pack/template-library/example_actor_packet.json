@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "template_id": "quest_collect_herbs_completed_06",
+  "action_result": {
+    "status": "COMPLETED",
+    "quest_id": "q_example"
+  },
+  "variables": {
+    "quest_title": "Листья после мороза",
+    "reward_text": "десять местных монет"
+  },
+  "facts_forbidden": [
+    "новые суммы",
+    "новые предметы",
+    "изменение канона"
+  ]
+}

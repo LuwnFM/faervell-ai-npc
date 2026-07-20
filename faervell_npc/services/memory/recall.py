@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from faervell_npc.config import get_settings
 from faervell_npc.models import TravelerMemory
 from faervell_npc.services.embeddings import get_embedder
 
 from .config import get_memory_config
-from .enums import AttributionMode, Confidentiality, DisclosureScope, LifecycleStatus, MemoryScope, MemoryTrust
+from .enums import (
+    AttributionMode,
+    Confidentiality,
+    DisclosureScope,
+    LifecycleStatus,
+    MemoryScope,
+    MemoryTrust,
+)
 from .ranking import rank_items
 from .schemas import MemoryRecallItem, MemoryRecallQuery
 from .text import lexical_similarity
@@ -20,6 +26,9 @@ class MemoryRecallService:
         self.embedder = get_embedder()
 
     async def recall(self, session: AsyncSession, query: MemoryRecallQuery) -> list[MemoryRecallItem]:
+        settings = get_settings()
+        if not settings.traveler_memory_v2_enabled or not settings.traveler_memory_v2_read_enabled:
+            return []
         filters = [
             TravelerMemory.traveler_entity_id == query.traveler_entity_id,
             TravelerMemory.lifecycle_status == LifecycleStatus.ACTIVE.value,
@@ -39,17 +48,48 @@ class MemoryRecallService:
             filters.append(personal)
         if query.scene_id:
             filters.append(or_(TravelerMemory.source_scene_id == query.scene_id, TravelerMemory.source_scene_id.is_(None)))
-        rows = (
-            await session.execute(
-                select(TravelerMemory).where(*filters).order_by(TravelerMemory.importance.desc()).limit(get_memory_config().candidate_pool)
-            )
-        ).scalars().all()
         query_vector = self.embedder.embed(query.text) if query.text else None
+        statement = select(TravelerMemory).where(*filters)
+        is_postgres = False
+        try:
+            is_postgres = session.get_bind().dialect.name == "postgresql"
+        except Exception:
+            pass
+        if is_postgres and query.text:
+            fts = func.to_tsvector(
+                "russian", TravelerMemory.normalized_content
+            ).op("@@")(func.plainto_tsquery("russian", query.text))
+            statement = statement.where(fts)
+            if query_vector is not None:
+                statement = statement.order_by(TravelerMemory.embedding.cosine_distance(query_vector))
+        else:
+            statement = statement.order_by(TravelerMemory.importance.desc())
+        rows = (await session.execute(statement.limit(get_memory_config().candidate_pool))).scalars().all()
         items: list[MemoryRecallItem] = []
         for memory in rows:
+            if memory.scope_type == MemoryScope.TESTIMONY:
+                subject_ids = {str(item) for item in (memory.subject_character_ids or [])}
+                allowed_ids = {query.active_character_id, *query.query_character_ids}
+                if not subject_ids.intersection(allowed_ids) and memory.speaker_character_id != query.active_character_id:
+                    continue
+            if memory.scope_type == MemoryScope.WORLD_TESTIMONY and query.route != "LORE":
+                entity_keys = {str(item).casefold() for item in (memory.subject_entity_keys or [])}
+                query_keys = {str(item).casefold() for item in query.entity_keys}
+                if entity_keys and query_keys.isdisjoint(entity_keys):
+                    continue
             if memory.confidentiality in {Confidentiality.GM_ONLY.value, Confidentiality.REDACTED.value}:
                 continue
             if memory.disclosure_scope == DisclosureScope.GM_RESTRICTED.value:
+                continue
+            if (
+                memory.disclosure_scope == DisclosureScope.PRIVATE.value
+                and memory.speaker_character_id != query.active_character_id
+            ):
+                continue
+            if (
+                memory.attribution_mode == AttributionMode.PRIVATE.value
+                and memory.speaker_character_id != query.active_character_id
+            ):
                 continue
             if memory.scope_type == MemoryScope.TESTIMONY.value and not query.allow_testimonies:
                 continue

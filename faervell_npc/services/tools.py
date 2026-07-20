@@ -16,11 +16,13 @@ from faervell_npc.models import (
     QuestObjective,
     RelationshipState,
     SceneConfig,
+    TravelerOpenThread,
 )
 from faervell_npc.schemas import Corpus, QuestDraft, ToolRequest
 from faervell_npc.services.disclosure import DisclosureContext, LoreDisclosureEngine
 from faervell_npc.services.economy import EconomyService
 from faervell_npc.services.knowledge import KnowledgeService
+from faervell_npc.services.quests import QuestService
 from faervell_npc.services.rules import RuleEngine
 
 
@@ -39,6 +41,7 @@ class ToolExecutor:
         self.rules = rules
         self.disclosure = disclosure
         self.economy = economy or EconomyService()
+        self.quests = QuestService()
 
     async def execute_all(
         self,
@@ -183,6 +186,19 @@ class ToolExecutor:
                 "instruction": "Inventory integration is disabled in MVP; do not claim success.",
             }
 
+        if request.name == "advance_quest":
+            quest_id = self._required_str(args, "quest_id")
+            event = self._required_str(args, "event")
+            action_result = args.get("action_result")
+            if not isinstance(action_result, dict):
+                raise ValueError("action_result must be an object")
+            return await self.quests.advance(
+                session,
+                quest_id=quest_id,
+                event=event,
+                action_result=action_result,
+            )
+
         if request.name in {"create_quest_draft", "validate_quest", "commit_quest"}:
             raw = args.get("quest") if request.name == "validate_quest" else args
             quest = QuestDraft.model_validate(raw)
@@ -219,6 +235,8 @@ class ToolExecutor:
                         "description": quest.description,
                         "location_name": quest.location_name,
                         "reward_note": quest.reward_note,
+                        "quest_type": quest.quest_type,
+                        "template_event": quest.template_event,
                     },
                     evidence=quest.evidence,
                 )
@@ -237,6 +255,16 @@ class ToolExecutor:
                             depends_on=[f"{record.id}:{dep}" for dep in objective.depends_on],
                         )
                     )
+                session.add(
+                    TravelerOpenThread(
+                        character_id=character_id,
+                        kind="PERSONAL_REQUEST",
+                        summary=f"Квест: {quest.title}",
+                        status="OPEN",
+                        importance=0.7,
+                        related_quest_id=record.id,
+                    )
+                )
                 response.update({"committed": True, "quest_id": record.id, "status": status})
                 if status == "PENDING_GM":
                     review = await self._create_review_request(

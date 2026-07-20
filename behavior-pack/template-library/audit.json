@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "source_archive": "stranger_template_library_500.zip",
+  "total": 500,
+  "status_counts": {
+    "APPROVED_PERSONA": 370,
+    "REVIEW_ACTION_RESULT": 130
+  },
+  "rejected_ids": [],
+  "allowed_tones": [
+    "calm",
+    "mysterious",
+    "non_aggressive",
+    "restrained"
+  ],
+  "rules": [
+    "persona_claims_godhood",
+    "persona_starts_attack",
+    "persona_invents_facts",
+    "persona_claims_certain_future"
+  ]
+}

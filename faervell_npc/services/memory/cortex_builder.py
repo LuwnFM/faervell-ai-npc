@@ -7,7 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from faervell_npc.config import get_settings
-from faervell_npc.models import RelationshipState, TravelerCortexSnapshot, TravelerMemory, TravelerOpenThread
+from faervell_npc.models import (
+    RelationshipState,
+    TravelerCortexSnapshot,
+    TravelerMemory,
+    TravelerOpenThread,
+)
 
 from .enums import LifecycleStatus, MemoryScope
 

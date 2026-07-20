@@ -13,9 +13,9 @@ import json
 import re
 import sqlite3
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
-
+from typing import Any
 
 DEFAULT_INCLUDE = (
     "природн",

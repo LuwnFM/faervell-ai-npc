@@ -85,6 +85,13 @@ async def init_db() -> None:
         await conn.execute(
             text(
                 "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS startup_lock_released BOOLEAN "
+                "NOT NULL DEFAULT FALSE"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE traveler_presence "
                 "ADD COLUMN IF NOT EXISTS current_scene_engaged_until TIMESTAMPTZ"
             )
         )
@@ -157,6 +164,13 @@ async def init_db() -> None:
                     f"ADD COLUMN IF NOT EXISTS {column} {definition}"
                 )
             )
+        for column, definition in {"corroboration_count": "INTEGER NOT NULL DEFAULT 0"}.items():
+            await conn.execute(
+                text(
+                    "ALTER TABLE memory_claims "
+                    f"ADD COLUMN IF NOT EXISTS {column} {definition}"
+                )
+            )
         await conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS ix_memory_character_lifecycle "
@@ -169,6 +183,24 @@ async def init_db() -> None:
                 "ON traveler_character_memories(scope_type, lifecycle_status)"
             )
         )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_memory_normalized_content_russian "
+                "ON traveler_character_memories USING GIN "
+                "(to_tsvector('russian', normalized_content))"
+            )
+        )
+        for index_name, column in (
+            ("ix_memory_subject_characters_gin", "subject_character_ids"),
+            ("ix_memory_subject_entities_gin", "subject_entity_keys"),
+            ("ix_memory_participants_gin", "participant_character_ids"),
+        ):
+            await conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS {index_name} "
+                    f"ON traveler_character_memories USING GIN ({column})"
+                )
+            )
         await conn.execute(
             text(
                 """

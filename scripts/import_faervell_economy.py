@@ -118,13 +118,14 @@ def normalize_item(
     info = values[info_i] if info_i is not None and info_i < len(values) else ""
     extra = values[extra_i] if extra_i is not None and extra_i < len(values) else ""
     identity = "|".join((workbook_id, tab.gid, country, category, name, price, currency, quantity))
+    category = re.sub(r"^[💼🍗👗⚔️⛏️📦🎓⛰️🐮⛵️🏠⚗️🏷️\s]+|[💼🍗👗⚔️⛏️📦🎓⛰️🐮⛵️🏠⚗️🏷️\s]+$", "", category)
     return {
         "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24],
         "source_id": f"faervell_economy:{workbook_id}:{tab.gid}",
         "source_url": f"https://docs.google.com/spreadsheets/d/{workbook_id}/edit?gid={tab.gid}",
         "workbook_id": workbook_id,
         "country": country,
-        "category": category.strip("💼🍗👗⚔️⛏️📦🎓⛰️🐮⛵️🏠⚗️🏷️ "),
+        "category": category,
         "sheet": tab.name,
         "item_name": name,
         "price_otn": price,

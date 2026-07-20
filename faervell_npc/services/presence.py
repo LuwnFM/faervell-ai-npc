@@ -91,9 +91,23 @@ class PresenceService:
         if current_scene is None and not presence.movement_locked:
             self._clear_current(presence)
 
-        if self.settings.traveler_enforce_startup_lock and self.settings.traveler_startup_lock_channel_id:
+        startup_channel_id = self.settings.traveler_startup_lock_channel_id
+        startup_lock_applies = (
+            self.settings.traveler_enforce_startup_lock
+            and startup_channel_id
+            and not presence.startup_lock_released
+            # A GM may deliberately add a second, manual lock after release.
+            # Do not let the process-start policy overwrite that lock on the
+            # next message; only an unlocked presence or the startup channel
+            # itself is eligible for the startup reset.
+            and (
+                not presence.movement_locked
+                or presence.locked_channel_id in {None, str(startup_channel_id)}
+            )
+        )
+        if startup_lock_applies:
             presence.movement_locked = True
-            presence.locked_channel_id = str(self.settings.traveler_startup_lock_channel_id)
+            presence.locked_channel_id = str(startup_channel_id)
             self._clear_next(presence)
         elif presence.movement_locked and presence.locked_channel_id is None:
             presence.movement_locked = False
@@ -288,6 +302,7 @@ class PresenceService:
         if configured and scene.channel_id != str(configured):
             raise ValueError("startup lock scene does not match configured channel")
         presence = await self.ensure_presence(session, guild_id=guild_id)
+        presence.startup_lock_released = False
         presence.movement_locked = True
         presence.locked_channel_id = scene.channel_id
         self._apply_current_scene(presence, scene)
@@ -370,25 +385,64 @@ class PresenceService:
         scene: SceneConfig | None = None,
     ) -> TravelerPresence:
         presence = await self.ensure_presence(session, guild_id=guild_id)
-        # In the v0.7 test profile the startup lock is a hard safety boundary, not merely
-        # a saved preference. It can only be disabled through configuration and a restart.
-        if not enabled and self.settings.traveler_enforce_startup_lock:
-            presence.movement_locked = True
-            if self.settings.traveler_startup_lock_channel_id is not None:
-                presence.locked_channel_id = str(self.settings.traveler_startup_lock_channel_id)
-            self._clear_next(presence)
-            return presence
-
         presence.movement_locked = enabled
         if enabled:
             if scene is None:
                 raise ValueError("Для блокировки нужна сцена")
+            # Re-locking the configured startup channel starts a new process
+            # gate. A manual lock in any other location must remain a manual
+            # lock and must not send the traveller back to bureaucracy.
+            if scene.channel_id == str(self.settings.traveler_startup_lock_channel_id or ""):
+                presence.startup_lock_released = False
             presence.locked_channel_id = scene.channel_id
             self._apply_current_scene(presence, scene)
             self._clear_next(presence)
         else:
+            presence.startup_lock_released = True
             presence.locked_channel_id = None
         return presence
+
+    async def release_startup_lock_and_roll(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        allowed_channel_ids: set[str] | None = None,
+    ) -> PresenceTransition | None:
+        """Release the per-process startup lock and immediately roll a destination.
+
+        The release is persisted only for the current process lifetime. ``on_ready``
+        resets it on every fresh start, so a crash or restart always returns the
+        Stranger to the configured bureaucracy-domain channel.
+        """
+
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        configured = self.settings.traveler_startup_lock_channel_id
+        if configured is None or not self.settings.traveler_enforce_startup_lock:
+            raise ValueError("Обязательный startup-lock не настроен")
+        if presence.locked_channel_id not in {None, str(configured)}:
+            raise ValueError("Сначала снимите ручную блокировку текущей локации")
+
+        presence.startup_lock_released = True
+        presence.movement_locked = False
+        presence.locked_channel_id = None
+        self._clear_next(presence)
+
+        scenes = await self._automatic_scenes(
+            session,
+            guild_id=guild_id,
+            current_channel_id=presence.current_channel_id,
+            allowed_channel_ids=allowed_channel_ids,
+        )
+        if not scenes:
+            return None
+        target = self._weighted_choice(scenes)
+        return await self.set_current_scene(
+            session,
+            guild_id=guild_id,
+            scene=target,
+            reason="выпуск из startup-lock: взвешенный выбор RP-локации",
+        )
 
     async def tick(
         self,
@@ -424,21 +478,12 @@ class PresenceService:
                 reason = "запланированный переход после осмысленного призыва"
 
         if target is None and presence.next_channel_id is None:
-            scenes = list(
-                (
-                    await session.execute(
-                        select(SceneConfig).where(
-                            SceneConfig.guild_id == guild_id,
-                            SceneConfig.enabled.is_(True),
-                            SceneConfig.automatic_appearance_allowed.is_(True),
-                            SceneConfig.channel_id != presence.current_channel_id,
-                            SceneConfig.appearance_probability > 0,
-                        )
-                    )
-                ).scalars()
+            scenes = await self._automatic_scenes(
+                session,
+                guild_id=guild_id,
+                current_channel_id=presence.current_channel_id,
+                allowed_channel_ids=allowed_channel_ids,
             )
-            if allowed_channel_ids is not None:
-                scenes = [scene for scene in scenes if scene.channel_id in allowed_channel_ids]
             passed = [
                 scene
                 for scene in scenes
@@ -456,6 +501,31 @@ class PresenceService:
             scene=target,
             reason=reason,
         )
+
+    @staticmethod
+    async def _automatic_scenes(
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        current_channel_id: str | None,
+        allowed_channel_ids: set[str] | None,
+    ) -> list[SceneConfig]:
+        scenes = list(
+            (
+                await session.execute(
+                    select(SceneConfig).where(
+                        SceneConfig.guild_id == guild_id,
+                        SceneConfig.enabled.is_(True),
+                        SceneConfig.automatic_appearance_allowed.is_(True),
+                        SceneConfig.channel_id != current_channel_id,
+                        SceneConfig.appearance_probability > 0,
+                    )
+                )
+            ).scalars()
+        )
+        if allowed_channel_ids is not None:
+            scenes = [scene for scene in scenes if scene.channel_id in allowed_channel_ids]
+        return scenes
 
     def _weighted_choice(self, scenes: list[SceneConfig]) -> SceneConfig:
         weights = [max(0.001, min(1.0, scene.appearance_probability)) for scene in scenes]

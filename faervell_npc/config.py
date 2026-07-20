@@ -154,6 +154,7 @@ class Settings(BaseSettings):
     character_match_margin: float = 0.04
 
     behavior_pack_path: Path = Path("behavior-pack")
+    template_library_path: Path = Path("behavior-pack/template-library")
     data_path: Path = Path("data")
 
     @field_validator(

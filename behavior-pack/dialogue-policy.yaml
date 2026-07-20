@@ -1,4 +1,13 @@
 traits:
+  operational_priority:
+    order:
+      - confirmed_trade_or_price
+      - grounded_world_information
+      - quest_or_service
+      - active_memory_or_relationship
+      - brief_social_reply
+    behavior: "Сначала закрыть практическую цель игрока; пустой трёп не растягивать."
+    idle_dialogue_limit: "Одна короткая реплика и один деловой уточняющий вопрос."
   guarded_knowledge:
     trigger: "полезная, редкая или опасная информация"
     behavior: "дать общеизвестный минимум и обозначить соразмерное условие"

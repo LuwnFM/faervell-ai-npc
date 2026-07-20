@@ -14,6 +14,7 @@ from faervell_npc.models import (
 )
 from faervell_npc.services.embeddings import get_embedder
 
+from .config import get_memory_config
 from .deduplication import compare_claims
 from .enums import LifecycleStatus, MemoryScope, MemoryTrust, OpenThreadKind, OpenThreadStatus
 from .schemas import MemoryCandidate, MemoryWriteResult, TestimonyCandidate
@@ -56,19 +57,37 @@ class MemoryWriter:
                     reason="source_message_already_recorded",
                 )
 
-        claim = (
+        claim_rows = (
             await session.execute(
                 select(MemoryClaim)
-                .where(
-                    MemoryClaim.traveler_entity_id == candidate.traveler_entity_id,
-                    MemoryClaim.claim_hash == content_hash(normalized),
-                )
-                .limit(1)
+                .where(MemoryClaim.traveler_entity_id == candidate.traveler_entity_id)
+                .order_by(MemoryClaim.updated_at.desc())
+                .limit(get_memory_config().candidate_pool)
             )
-        ).scalar_one_or_none()
+        ).scalars().all()
+        claim = None
+        decision = None
+        for existing in claim_rows:
+            candidate_decision = compare_claims(
+                existing.normalized_claim,
+                normalized,
+                left_trust=existing.current_status,
+                right_trust=candidate.trust_status.value,
+                lexical_threshold=get_memory_config().dedup_lexical_threshold,
+            )
+            if candidate_decision.duplicate:
+                claim = existing
+                decision = candidate_decision
+                break
+            if candidate_decision.conflict:
+                # Preserve incompatible versions as separate claims. The
+                # relation graph can connect them later without collapsing
+                # their evidence into a false consensus.
+                decision = candidate_decision
         action = "CREATED"
-        conflict = False
+        conflict = bool(decision and decision.conflict)
         if claim is None:
+            action = "CONFLICT_CREATED" if conflict else "CREATED"
             claim = MemoryClaim(
                 traveler_entity_id=candidate.traveler_entity_id,
                 normalized_claim=normalized,
@@ -82,16 +101,24 @@ class MemoryWriter:
             await session.flush()
         else:
             action = "EVIDENCE_ADDED"
-            decision = compare_claims(
-                claim.normalized_claim,
-                normalized,
-                left_trust=claim.current_status,
-                right_trust=candidate.trust_status.value,
-            )
-            conflict = decision.conflict
             claim.reinforcement_count += 1
-            if conflict:
-                action = "CONFLICT_CREATED"
+            if candidate.speaker_character_id:
+                speaker_rows = (
+                    await session.execute(
+                        select(MemoryEvidence.speaker_character_id).where(
+                            MemoryEvidence.claim_id == claim.id,
+                            MemoryEvidence.speaker_character_id.is_not(None),
+                        )
+                    )
+                ).all()
+                speakers = {str(row[0]) for row in speaker_rows if row[0]}
+                if candidate.speaker_character_id not in speakers:
+                    claim.corroboration_count += 1
+            if claim.corroboration_count >= 2 and claim.current_status in {
+                MemoryTrust.RUMOR.value,
+                MemoryTrust.OTHER_CHARACTER_SAID.value,
+            }:
+                claim.current_status = MemoryTrust.CORROBORATED_RUMOR.value
 
         memory = TravelerMemory(
             character_id=candidate.owner_character_id or (candidate.subject_character_ids[0] if candidate.subject_character_ids else "world"),
@@ -117,6 +144,9 @@ class MemoryWriter:
             participant_character_ids=join_unique(candidate.participant_character_ids),
             mentioned_dates=[item.isoformat() for item in candidate.mentioned_dates],
             novelty_score=1.0 if action == "CREATED" else 0.25,
+            reinforcement_count=claim.reinforcement_count,
+            corroboration_count=claim.corroboration_count,
+            last_reinforced_at=now if action != "CREATED" else None,
             attribution_mode=candidate.attribution_mode.value,
             disclosure_scope=candidate.disclosure_scope.value,
             confidentiality=candidate.confidentiality.value,
@@ -215,6 +245,24 @@ class MemoryWriter:
         )
         session.add(thread)
         await self.mark_cortex_dirty(session, [character_id], reason="open_thread:created")
+        return thread
+
+    async def resolve_open_thread(
+        self,
+        session: AsyncSession,
+        thread_id: str,
+        *,
+        status: OpenThreadStatus = OpenThreadStatus.RESOLVED,
+        resolution: str = "",
+    ) -> TravelerOpenThread:
+        thread = await session.get(TravelerOpenThread, thread_id)
+        if thread is None:
+            raise ValueError(f"unknown open thread: {thread_id}")
+        thread.status = status.value
+        thread.resolution = resolution[:2000] or None
+        thread.resolved_at = datetime.now(UTC)
+        thread.version += 1
+        await self.mark_cortex_dirty(session, [thread.character_id], reason="open_thread:resolved")
         return thread
 
     async def anchor(self, session: AsyncSession, memory_id: str, value: bool = True) -> TravelerMemory:

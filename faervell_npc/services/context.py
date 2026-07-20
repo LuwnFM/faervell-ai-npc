@@ -145,6 +145,31 @@ class SceneContextBuilder:
             },
         )
 
+    async def refresh_memory_context(
+        self,
+        session: AsyncSession,
+        context: SceneContext,
+        *,
+        query: str,
+        route: str,
+    ) -> SceneContext:
+        """Re-render memory after routing so LORE/MECHANICS/PLANNER receive
+        the route-specific recall policy from the integration document."""
+        cortex = await self.memory.build_cortex_context(
+            session,
+            character_id=context.character_id,
+            scene_id=context.scene_id,
+            query=query,
+            route=route,
+        )
+        context.cortex = cortex.model_dump(mode="json")
+        context.recalled_memories = [item.model_dump(mode="json") for item in cortex.recalled_memories]
+        context.recalled_testimonies = [item.model_dump(mode="json") for item in cortex.recalled_testimonies]
+        context.memories = await self.memory.retrieve(
+            session, character_id=context.character_id, query=query
+        )
+        return context
+
     @staticmethod
     def _interaction_guidance(content: str) -> dict[str, object]:
         lowered = content.casefold()

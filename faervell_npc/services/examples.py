@@ -13,8 +13,12 @@ class ApprovedExampleService:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.embedder = get_embedder()
-        self.path = Path(self.settings.behavior_pack_path) / "approved-examples.jsonl"
-        self._mtime_ns: int | None = None
+        self.paths = (
+            Path(self.settings.behavior_pack_path) / "approved-examples.jsonl",
+            Path(self.settings.behavior_pack_path) / "template-library" / "templates.stranger.jsonl",
+            Path(self.settings.behavior_pack_path) / "template-library" / "operational.stranger.jsonl",
+        )
+        self._mtime_ns: tuple[int, ...] | None = None
         self._examples: list[tuple[dict[str, Any], list[float]]] = []
 
     def search(self, query: str, *, limit: int = 4) -> list[dict[str, Any]]:
@@ -32,22 +36,27 @@ class ApprovedExampleService:
         ]
 
     def _reload_if_needed(self) -> None:
-        if not self.path.exists():
+        mtimes = tuple(path.stat().st_mtime_ns if path.exists() else 0 for path in self.paths)
+        if not any(mtimes):
             self._examples = []
             return
-        mtime_ns = self.path.stat().st_mtime_ns
-        if self._mtime_ns == mtime_ns:
+        if self._mtime_ns == mtimes:
             return
         loaded: list[tuple[dict[str, Any], list[float]]] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
+        for path in self.paths:
+            if not path.exists():
                 continue
-            example = json.loads(line)
-            text = str(example.get("input_pattern") or example.get("text") or "")
-            if text:
-                loaded.append((example, self.embedder.embed(text)))
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                example = json.loads(line)
+                if example.get("library_status") == "REJECTED_PERSONA":
+                    continue
+                text = str(example.get("input_pattern") or example.get("text") or "")
+                if text:
+                    loaded.append((example, self.embedder.embed(text)))
         self._examples = loaded
-        self._mtime_ns = mtime_ns
+        self._mtime_ns = mtimes
 
     @staticmethod
     def _cosine(left: list[float], right: list[float]) -> float:

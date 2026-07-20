@@ -8,8 +8,9 @@ from sqlalchemy import text
 
 from faervell_npc.config import get_settings
 from faervell_npc.db import SessionLocal, init_db
-from faervell_npc.models import MemoryClaim, MemoryEvidence, TravelerMemory
+from faervell_npc.models import MemoryClaim, TravelerMemory
 from faervell_npc.runtime import Runtime, build_runtime
+from faervell_npc.services.memory.schemas import CortexRenderBudget, MemoryRecallQuery
 
 
 def create_app(
@@ -85,6 +86,9 @@ def create_app(
             for key in ("importance", "why_saved", "attribution_mode", "disclosure_scope", "confidentiality"):
                 if key in payload:
                     setattr(item, key, payload[key])
+            await owned_runtime.orchestrator.memory.cortex.mark_dirty(
+                session, item.character_id, "memory:manual_patch"
+            )
             await session.commit()
             return {key: value for key, value in item.__dict__.items() if not key.startswith("_")}
 
@@ -133,6 +137,48 @@ def create_app(
             )).mappings().all()
             return [dict(row) for row in rows]
 
+    async def _claim_action(claim_id: str, status: str, source: str) -> dict[str, object]:
+        async with SessionLocal() as session:
+            claim = await session.get(MemoryClaim, claim_id)
+            if claim is None:
+                raise HTTPException(status_code=404, detail="claim not found")
+            claim.current_status = status
+            claim.confirmation_source = source
+            claim.version += 1
+            memories = (
+                await session.execute(
+                    text(
+                        "SELECT DISTINCT character_id FROM traveler_character_memories "
+                        "WHERE claim_id = :claim_id"
+                    ),
+                    {"claim_id": claim_id},
+                )
+            ).scalars().all()
+            for character_id in memories:
+                await owned_runtime.orchestrator.memory.cortex.mark_dirty(
+                    session, str(character_id), f"claim:{status.lower()}"
+                )
+            await session.commit()
+            return {key: value for key, value in claim.__dict__.items() if not key.startswith("_")}
+
+    for _slug, _status in (
+        ("confirm", "CONFIRMED"),
+        ("dispute", "DISPUTED"),
+        ("contradict", "CONTRADICTED"),
+        ("retract", "RETRACTED"),
+    ):
+        async def _claim_handler(
+            claim_id: str,
+            status: str = _status,
+        ) -> dict[str, object]:
+            return await _claim_action(claim_id, status, "admin")
+
+        app.add_api_route(
+            f"/internal/claims/{{claim_id}}/{_slug}",
+            _claim_handler,
+            methods=["POST"],
+        )
+
     @app.get("/internal/cortex/{character_id}")
     async def cortex_detail(character_id: str) -> dict[str, object]:
         async with SessionLocal() as session:
@@ -151,6 +197,29 @@ def create_app(
     @app.post("/internal/cortex/{character_id}/reset-generated")
     async def cortex_reset(character_id: str) -> dict[str, object]:
         return await cortex_rebuild(character_id)
+
+    @app.post("/internal/cortex/{character_id}/preview")
+    async def cortex_preview(
+        character_id: str,
+        payload: dict[str, object] = Body(default_factory=dict),
+    ) -> dict[str, object]:
+        async with SessionLocal() as session:
+            query = MemoryRecallQuery(
+                active_character_id=character_id,
+                scene_id=str(payload.get("scene_id")) if payload.get("scene_id") else None,
+                text=str(payload.get("query") or ""),
+                route=str(payload.get("route") or "CHAT"),
+                entity_keys=[str(item) for item in payload.get("entity_keys", [])],
+            )
+            budget = CortexRenderBudget(
+                model_id=str(payload.get("model_id") or "runtime"),
+                context_length=int(payload.get("context_length") or settings.model_context_length),
+                reserved_output_tokens=int(payload.get("reserved_output_tokens") or settings.actor_max_tokens),
+            )
+            context = await owned_runtime.orchestrator.memory.cortex.get_context(
+                session, query=query, budget=budget
+            )
+            return context.model_dump(mode="json")
 
     return app
 

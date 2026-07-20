@@ -377,7 +377,7 @@ class StrangerCommands(commands.Cog):
 
     @stranger.command(
         name="movement_lock",
-        description="Временно запереть Странника в этом канале или снять ограничение",
+        description="Запереть Странника; false выпускает из startup-lock и бросает веса локаций",
     )
     async def movement_lock(self, interaction: discord.Interaction, enabled: bool) -> None:
         if not await self._require_gm(interaction):
@@ -387,19 +387,21 @@ class StrangerCommands(commands.Cog):
                 "Команда работает только на сервере.", ephemeral=True
             )
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        release_transition: PresenceTransition | None = None
         async with SessionLocal() as session:
             scene = None
             if enabled:
                 channel = interaction.channel
                 if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "Ограничение можно включить только в текстовом канале или ветке.",
                         ephemeral=True,
                     )
                     return
                 writable, missing = self.bot._channel_postability(channel)
                 if not writable:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "Нельзя закрепить Странника здесь. Не хватает: " + ", ".join(missing),
                         ephemeral=True,
                     )
@@ -418,28 +420,80 @@ class StrangerCommands(commands.Cog):
                     await session.flush()
                 else:
                     scene.enabled = True
-            presence = await self.runtime.presence.set_movement_lock(
-                session,
-                guild_id=str(interaction.guild_id),
-                enabled=enabled,
-                scene=scene,
-            )
+            if (
+                not enabled
+                and self.settings.traveler_enforce_startup_lock
+                and self.settings.traveler_startup_lock_channel_id
+                and interaction.guild is not None
+            ):
+                current = await self.runtime.presence.ensure_presence(
+                    session,
+                    guild_id=str(interaction.guild_id),
+                )
+                if (
+                    current.movement_locked
+                    and current.locked_channel_id
+                    == str(self.settings.traveler_startup_lock_channel_id)
+                ):
+                    allowed = self.bot._automatic_destination_ids(
+                        interaction.guild,
+                        event_locations_enabled=current.event_locations_enabled,
+                        startup_lock_active=False,
+                    )
+                    release_transition = await self.runtime.presence.release_startup_lock_and_roll(
+                        session,
+                        guild_id=str(interaction.guild_id),
+                        allowed_channel_ids=allowed,
+                    )
+                    presence = current
+                else:
+                    presence = await self.runtime.presence.set_movement_lock(
+                        session,
+                        guild_id=str(interaction.guild_id),
+                        enabled=enabled,
+                        scene=scene,
+                    )
+            else:
+                presence = await self.runtime.presence.set_movement_lock(
+                    session,
+                    guild_id=str(interaction.guild_id),
+                    enabled=enabled,
+                    scene=scene,
+                )
             await session.commit()
 
-        if enabled:
+        if release_transition is not None:
+            posted, error = await self.bot._announce_arrival(release_transition)
+            destination = release_transition.location_name or release_transition.channel_id
+            text = (
+                f"Startup-lock снят. Странник выпущен из домена бюрократии; "
+                f"взвешенный выбор привёл его в **{destination}**."
+            )
+            if not posted:
+                text += " RP-пост не отправлен: " + (error or "неизвестная ошибка")
+        elif enabled:
             text = (
                 f"Странник закреплён в **{presence.current_location_name or 'этом канале'}**. "
                 "Случайные переходы и призывы из других локаций не сработают."
             )
         elif presence.movement_locked:
             text = (
-                "Ограничение не снято: включён обязательный тестовый startup-lock. "
-                f"Странник остаётся в <#{presence.locked_channel_id}> до отключения "
-                "TRAVELER_ENFORCE_STARTUP_LOCK и перезапуска."
+                "Ограничение не снято: активна ручная блокировка текущей локации. "
+                f"Канал: <#{presence.locked_channel_id}>."
+            )
+        elif (
+            not enabled
+            and presence.startup_lock_released
+            and presence.current_channel_id
+            == str(self.settings.traveler_startup_lock_channel_id or "")
+        ):
+            text = (
+                "Startup-lock снят, но подходящей разрешённой RP-локации для weighted roll "
+                "пока нет; Странник остаётся в текущем канале до следующего запуска выбора."
             )
         else:
             text = "Ограничение снято. Странник снова может перемещаться между локациями."
-        await interaction.response.send_message(text, ephemeral=True)
+        await interaction.followup.send(text, ephemeral=True)
 
     @stranger.command(
         name="event_locations",
@@ -962,7 +1016,7 @@ class StrangerCommands(commands.Cog):
                 posted, failed, reasons = await self.bot._retry_pending_gm_reviews(
                     guild_id=str(interaction.guild_id), limit=100
                 )
-            output = Path("data/exports") / f"behavior-scan-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.json"
+            output = Path("data/exports") / f"behavior-scan-{datetime.now(UTC):%Y%m%d-%H%M%S}.json"
             self.behavior.export_scan(report, output)
             note = (
                 "Нормализованный отчёт собран. "
@@ -981,6 +1035,7 @@ class StrangerCommands(commands.Cog):
             return
 
         from sqlalchemy import delete
+
         from faervell_npc.models import (
             RelationshipState,
             SceneCharacterIdentity,
@@ -1121,7 +1176,7 @@ class StrangerCommands(commands.Cog):
                     review.status = "REJECTED"
                     review.decision_note = "Пробел очищен командой ГМ"
                     review.decided_by_discord_user_id = str(interaction.user.id)
-                    review.decided_at = datetime.now(timezone.utc)
+                    review.decided_at = datetime.now(UTC)
                     closed_reviews += 1
             await session.commit()
             await interaction.response.send_message(
@@ -1255,10 +1310,12 @@ class FaervellBot(commands.Bot):
         guild: discord.Guild,
         *,
         event_locations_enabled: bool,
+        startup_lock_active: bool = True,
     ) -> set[str]:
         startup_lock = (
             str(self.settings.traveler_startup_lock_channel_id)
-            if self.settings.traveler_enforce_startup_lock
+            if startup_lock_active
+            and self.settings.traveler_enforce_startup_lock
             and self.settings.traveler_startup_lock_channel_id
             else None
         )
@@ -2209,6 +2266,10 @@ class FaervellBot(commands.Bot):
                     allowed_channel_ids = self._automatic_destination_ids(
                         guild,
                         event_locations_enabled=presence.event_locations_enabled,
+                        startup_lock_active=(
+                            self.settings.traveler_enforce_startup_lock
+                            and not presence.startup_lock_released
+                        ),
                     )
                     transition = await self.runtime.presence.tick(
                         session,

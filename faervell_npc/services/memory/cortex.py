@@ -9,13 +9,23 @@ from .cortex_builder import CortexBuilderService
 from .cortex_renderer import CortexRenderer
 from .recall import MemoryRecallService
 from .schemas import CortexContext, CortexRenderBudget, MemoryRecallQuery
+from .testimony import TravelerTestimonyContextService
 
 
 class TravelerCortexService:
-    def __init__(self, *, builder: CortexBuilderService | None = None, recall: MemoryRecallService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        builder: CortexBuilderService | None = None,
+        recall: MemoryRecallService | None = None,
+        lock_manager: object | None = None,
+        testimony: TravelerTestimonyContextService | None = None,
+    ) -> None:
         self.builder = builder or CortexBuilderService()
         self.recall = recall or MemoryRecallService()
+        self.testimony = testimony or TravelerTestimonyContextService(self.recall)
         self.renderer = CortexRenderer()
+        self.lock_manager = lock_manager
 
     async def get_snapshot(self, session: AsyncSession, character_id: str, traveler_entity_id: str = "traveler_01") -> TravelerCortexSnapshot | None:
         return (
@@ -34,16 +44,33 @@ class TravelerCortexService:
         query: MemoryRecallQuery,
         budget: CortexRenderBudget,
     ) -> CortexContext:
-        snapshot = await self.get_snapshot(session, query.active_character_id, query.traveler_entity_id)
-        if snapshot is None or snapshot.dirty:
-            snapshot = await self.builder.rebuild_snapshot(
-                session, character_id=query.active_character_id,
-                reason=(snapshot.dirty_reason if snapshot else "missing"),
-                traveler_entity_id=query.traveler_entity_id,
-            )
+        async def ensure_snapshot() -> TravelerCortexSnapshot:
+            current = await self.get_snapshot(session, query.active_character_id, query.traveler_entity_id)
+            if current is None or current.dirty:
+                return await self.builder.rebuild_snapshot(
+                    session,
+                    character_id=query.active_character_id,
+                    reason=(current.dirty_reason if current else "missing"),
+                    traveler_entity_id=query.traveler_entity_id,
+                )
+            return current
+
+        if self.lock_manager is None:
+            snapshot = await ensure_snapshot()
+        else:
+            async with self.lock_manager.lock(f"cortex:{query.active_character_id}"):
+                # Re-read after acquiring the distributed lock: another worker
+                # may have rebuilt the same dirty snapshot while we waited.
+                snapshot = await ensure_snapshot()
         recalled = await self.recall.recall(session, query)
-        testimonies = [item for item in recalled if item.scope_type.value in {"TESTIMONY", "WORLD_TESTIMONY", "RUMOR"}]
-        personal = [item for item in recalled if item not in testimonies]
+        testimonies = await self.testimony.get_relevant_testimonies(
+            session,
+            query=query,
+            entity_keys=query.entity_keys,
+            render_budget=budget.usable_tokens(),
+        )
+        testimony_ids = {item.id for item in testimonies}
+        personal = [item for item in recalled if item.id not in testimony_ids]
         return self.renderer.render(
             identity_core=snapshot.identity_core,
             personal_memory_digest=snapshot.personal_memory_digest,
