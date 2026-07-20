@@ -142,7 +142,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [730030732185043004, 1490668605594013776]
     )
     knowledge_auto_ingest: bool = True
-    knowledge_min_wiki_documents: int = Field(default=689, ge=1)
+    knowledge_min_wiki_documents: int = Field(default=669, ge=1)
     knowledge_stale_hours: int = Field(default=24, ge=1)
     fandom_api_concurrency: int = Field(default=4, ge=1, le=12)
     fandom_batch_size: int = Field(default=40, ge=1, le=50)

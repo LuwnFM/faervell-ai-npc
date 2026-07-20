@@ -22,7 +22,7 @@ updates = {
     "TRAVELER_ENFORCE_STARTUP_LOCK": "true",
     "TRAVELER_STARTUP_LOCK_CHANNEL_ID": "1488544832950374481",
     "MODEL_CONTEXT_LENGTH": "8192",
-    "KNOWLEDGE_MIN_WIKI_DOCUMENTS": "689",
+    "KNOWLEDGE_MIN_WIKI_DOCUMENTS": "669",
 }
 lines = path.read_text(encoding="utf-8").splitlines()
 result = []
