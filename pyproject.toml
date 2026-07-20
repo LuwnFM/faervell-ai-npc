@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "Discord AI-NPC Stranger for Faervell RP"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = {text = "Proprietary"}
 authors = [{name = "Faervell RP"}]
 dependencies = [
   "discord.py>=2.6,<3",

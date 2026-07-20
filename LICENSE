@@ -1,21 +1,32 @@
-MIT License
+FAERVELL AI-NPC PROPRIETARY LICENSE
+Version 1.0 — 2026-07-20
 
-Copyright (c) 2026 Faervell RP
+Copyright (c) 2026 LuwnFM / Faervell RP. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository and its contents are proprietary. Public visibility of the
+repository grants permission to view the source code only. It does not grant
+any copyright license or permission to copy, reproduce, fork, mirror,
+redistribute, publish, sell, sublicense, modify, adapt, translate, reverse
+engineer, or create derivative works from any part of this project.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Without prior written permission from the copyright holder, it is also
+prohibited to:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. include this code, its architecture, prompts, behavior rules, templates,
+   datasets, or documentation in another product or repository;
+2. use the project or any substantial portion of it to train, fine-tune,
+   distill, evaluate, or create a derivative machine-learning model;
+3. remove copyright, attribution, access-control, or provenance notices; or
+4. use Faervell RP characters, lore, maps, economy data, Discord exports, or
+   other project materials outside the permissions granted by their owners.
+
+The copyright holder may grant a separate written license for a specific use.
+Such permission is valid only for the scope and period stated in that writing.
+Contributing code or opening an issue does not grant any additional rights.
+
+Third-party dependencies and separately identified external snapshots remain
+subject to their own licenses. This file governs the original Faervell
+AI-NPC code, behavior pack, templates, documentation, and project data.
+
+THE PROJECT IS PROVIDED “AS IS” TO THE EXTENT PERMITTED BY LAW. THIS NOTICE
+DOES NOT WAIVE ANY COPYRIGHT, TRADEMARK, DATABASE, PRIVACY, OR OTHER RIGHTS.
