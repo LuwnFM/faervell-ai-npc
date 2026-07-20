@@ -9,6 +9,7 @@ from faervell_npc.config import get_settings
 from faervell_npc.db import close_db, init_db
 from faervell_npc.discord_bot import FaervellBot
 from faervell_npc.runtime import build_runtime
+from faervell_npc.services.v100_hotfix import HOTFIX_VERSION, install_v100_hotfix
 
 
 async def run() -> None:
@@ -17,7 +18,18 @@ async def run() -> None:
         await init_db()
 
     runtime = build_runtime()
+    install_v100_hotfix(runtime)
     api = create_app(runtime, manage_runtime=False, initialize_schema=False)
+
+    @api.get("/version")
+    async def version() -> dict[str, object]:
+        return {
+            "version": "1.0.0",
+            "hotfix": HOTFIX_VERSION,
+            "templates": len(runtime.templates.all()),
+            "economy_index": runtime.economy.path.is_file(),
+        }
+
     server = uvicorn.Server(
         uvicorn.Config(
             api,
