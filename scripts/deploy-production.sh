@@ -12,6 +12,10 @@ test -f .env || {
   echo "Ошибка: production .env не найден в $APP_DIR" >&2
   exit 1
 }
+test -s data/economy/economy.sqlite3 || {
+  echo "Ошибка: data/economy/economy.sqlite3 не найден. Загрузите собранный индекс экономики перед релизом." >&2
+  exit 1
+}
 
 chmod 600 .env
 if [[ -f scripts/migrate-v0.7.sh ]]; then
@@ -26,6 +30,9 @@ fi
 
 if [[ -f scripts/migrate-v0.8.0.sh ]]; then
   bash scripts/migrate-v0.8.0.sh "$APP_DIR/.env"
+fi
+if [[ -f scripts/migrate-v1.0.0.sh ]]; then
+  bash scripts/migrate-v1.0.0.sh "$APP_DIR/.env"
 fi
 
 docker compose config >/dev/null

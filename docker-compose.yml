@@ -1,6 +1,11 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    # The production host has 4 vCPU / 8 GiB RAM. Keep headroom for Docker,
+    # Discord gateway bursts and a rollback container.
+    cpus: "1.50"
+    mem_limit: 2g
+    command: ["postgres", "-c", "shared_buffers=512MB", "-c", "max_connections=80"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-faervell}
       POSTGRES_USER: ${POSTGRES_USER:-faervell}
@@ -16,7 +21,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    cpus: "0.50"
+    mem_limit: 512m
+    command: redis-server --appendonly yes --maxmemory 384mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -28,6 +35,8 @@ services:
 
   app:
     build: .
+    cpus: "2.00"
+    mem_limit: 3g
     env_file: .env
     depends_on:
       postgres:

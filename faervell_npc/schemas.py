@@ -183,7 +183,7 @@ class QuestDraft(BaseModel):
 class ActorPacket(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "1.0"
+    schema_version: str = "1.0.0"
     response_type: ResponseType
     traveler_entity_id: str = "traveler_01"
     profession_mask_id: str = "traveler"
@@ -195,6 +195,9 @@ class ActorPacket(BaseModel):
     facts_forbidden: list[str] = Field(default_factory=list)
     required_mentions: list[str] = Field(default_factory=list)
     memories_allowed: list[str] = Field(default_factory=list)
+    cortex: dict[str, Any] = Field(default_factory=dict)
+    recalled_memories: list[dict[str, Any]] = Field(default_factory=list)
+    recalled_testimonies: list[dict[str, Any]] = Field(default_factory=list)
     action_result: dict[str, Any] = Field(default_factory=dict)
     quest_summary: QuestDraft | None = None
     disclosure_offer: DisclosureExchange | None = None
@@ -230,6 +233,9 @@ class SceneContext(BaseModel):
     character_id: str
     recent_messages: list[dict[str, str]] = Field(default_factory=list)
     memories: list[MemoryHit] = Field(default_factory=list)
+    cortex: dict[str, Any] = Field(default_factory=dict)
+    recalled_memories: list[dict[str, Any]] = Field(default_factory=list)
+    recalled_testimonies: list[dict[str, Any]] = Field(default_factory=list)
     active_quests: list[dict[str, Any]] = Field(default_factory=list)
     relationship_summary: str = "незнакомец"
     scene_state: dict[str, Any] = Field(default_factory=dict)

@@ -126,6 +126,12 @@ class TravelerPresence(Base):
     movement_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     locked_channel_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_scene_engaged_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_interaction_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     next_planned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -183,6 +189,7 @@ class CharacterProfile(Base):
     visible_profile: Mapped[str] = mapped_column(Text, default="")
     full_sheet: Mapped[str] = mapped_column(Text)
     attachment_urls: Mapped[list[str]] = mapped_column(JSON, default=list)
+    sheet_fields: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     identity_embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dimensions))
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -262,6 +269,39 @@ class TravelerMemory(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
+    # Memory v2 fields.  They are deliberately additive so existing 0.8 data can
+    # be migrated in place without rewriting the append-only conversation log.
+    traveler_entity_id: Mapped[str] = mapped_column(String(64), default="traveler_01", index=True)
+    scope_type: Mapped[str] = mapped_column(String(32), default="PERSONAL", index=True)
+    normalized_content: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    speaker_character_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    speaker_display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    subject_character_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    subject_entity_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    participant_character_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    mentioned_dates: Mapped[list[str]] = mapped_column(JSON, default=list)
+    novelty_score: Mapped[float] = mapped_column(Float, default=1.0)
+    reinforcement_count: Mapped[int] = mapped_column(Integer, default=0)
+    corroboration_count: Mapped[int] = mapped_column(Integer, default=0)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_reinforced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_anchor: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_cherished: Mapped[bool] = mapped_column(Boolean, default=False)
+    lifecycle_status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    why_saved: Mapped[str] = mapped_column(Text, default="")
+    attribution_mode: Mapped[str] = mapped_column(String(24), default="ATTRIBUTABLE")
+    disclosure_scope: Mapped[str] = mapped_column(String(24), default="PUBLIC")
+    confidentiality: Mapped[str] = mapped_column(String(24), default="PUBLIC")
+    source_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    source_quest_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    source_scene_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_location_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
     __table_args__ = (
         Index(
             "ix_memory_embedding_hnsw",
@@ -269,6 +309,113 @@ class TravelerMemory(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        Index("ix_memory_character_lifecycle", "character_id", "lifecycle_status"),
+        Index("ix_memory_scope_lifecycle", "scope_type", "lifecycle_status"),
+        Index("ix_memory_source_dedup", "source_message_id", "content_hash", "scope_type"),
+    )
+
+
+class MemoryClaim(Base):
+    __tablename__ = "memory_claims"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    traveler_entity_id: Mapped[str] = mapped_column(String(64), default="traveler_01", index=True)
+    normalized_claim: Mapped[str] = mapped_column(Text)
+    claim_hash: Mapped[str] = mapped_column(String(64), index=True)
+    subject_character_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    subject_entity_keys: Mapped[list[str]] = mapped_column(JSON, default=list)
+    claim_type: Mapped[str] = mapped_column(String(32), default="STATEMENT")
+    current_status: Mapped[str] = mapped_column(String(32), default="UNVERIFIED", index=True)
+    confirmation_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contradiction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reinforcement_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+    __table_args__ = (Index("ix_claim_hash_status", "claim_hash", "current_status"),)
+
+
+class MemoryEvidence(Base):
+    __tablename__ = "memory_evidence"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    claim_id: Mapped[str] = mapped_column(ForeignKey("memory_claims.id", ondelete="CASCADE"), index=True)
+    memory_id: Mapped[str | None] = mapped_column(
+        ForeignKey("traveler_character_memories.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), default="MESSAGE")
+    source_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_message_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    speaker_character_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    scene_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    location_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_excerpt: Mapped[str] = mapped_column(Text, default="")
+    trust_status: Mapped[str] = mapped_column(String(32), default="UNVERIFIED", index=True)
+    attribution_mode: Mapped[str] = mapped_column(String(24), default="ATTRIBUTABLE")
+    disclosure_scope: Mapped[str] = mapped_column(String(24), default="PUBLIC")
+    heard_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("claim_id", "source_type", "source_id", name="uq_claim_evidence_source"),)
+
+
+class TravelerCortexSnapshot(Base):
+    __tablename__ = "traveler_cortex_snapshots"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    traveler_entity_id: Mapped[str] = mapped_column(String(64), default="traveler_01", index=True)
+    character_id: Mapped[str] = mapped_column(String(128), index=True)
+    identity_core: Mapped[str] = mapped_column(Text, default="")
+    personal_memory_digest: Mapped[str] = mapped_column(Text, default="")
+    relationship_digest: Mapped[str] = mapped_column(Text, default="")
+    open_threads_digest: Mapped[str] = mapped_column(Text, default="")
+    testimony_digest: Mapped[str] = mapped_column(Text, default="")
+    shared_world_impressions: Mapped[str] = mapped_column(Text, default="")
+    source_fingerprint: Mapped[str] = mapped_column(String(64), default="")
+    dirty: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    dirty_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (UniqueConstraint("traveler_entity_id", "character_id", name="uq_cortex_character"),)
+
+
+class TravelerOpenThread(Base):
+    __tablename__ = "traveler_open_threads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    traveler_entity_id: Mapped[str] = mapped_column(String(64), default="traveler_01", index=True)
+    character_id: Mapped[str] = mapped_column(String(128), index=True)
+    related_character_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    kind: Mapped[str] = mapped_column(String(32), default="OPEN_QUESTION", index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="OPEN", index=True)
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    source_memory_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    related_claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    related_quest_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class MemoryRelation(Base):
+    __tablename__ = "memory_relations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid4_str)
+    source_memory_id: Mapped[str] = mapped_column(String(36), index=True)
+    target_memory_id: Mapped[str] = mapped_column(String(36), index=True)
+    relation_type: Mapped[str] = mapped_column(String(32), index=True)
+    strength: Mapped[float] = mapped_column(Float, default=1.0)
+    source: Mapped[str] = mapped_column(String(32), default="LOCAL")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("source_memory_id", "target_memory_id", "relation_type", name="uq_memory_relation"),
     )
 
 

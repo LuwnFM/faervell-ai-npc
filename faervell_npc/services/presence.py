@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,7 +60,16 @@ class PresenceService:
         *,
         guild_id: str,
     ) -> TravelerPresence:
-        presence = await session.get(TravelerPresence, "traveler_01")
+        # Serialize all presence reads/updates. The bot is global to the guild,
+        # so concurrent mentions from many channels must not create two active
+        # locations or overwrite a higher-priority queued destination.
+        presence = (
+            await session.execute(
+                select(TravelerPresence)
+                .where(TravelerPresence.traveler_entity_id == "traveler_01")
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if presence is None:
             presence = TravelerPresence(
                 traveler_entity_id="traveler_01",
@@ -295,6 +304,39 @@ class PresenceService:
         self._clear_next(presence)
         return presence
 
+    async def touch_current_scene(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        channel_id: str,
+    ) -> TravelerPresence:
+        """Extend the current-scene lease after a real interaction.
+
+        A queued travel request is a *plan*, never an interrupt. The movement
+        loop checks this lease before consuming the queue, which keeps the
+        Stranger in the current location while RP business is still active.
+        """
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        if presence.current_channel_id == channel_id:
+            now = datetime.now(UTC)
+            presence.last_interaction_at = now
+            presence.current_scene_engaged_until = now + timedelta(
+                seconds=self.settings.traveler_scene_settle_seconds
+            )
+        return presence
+
+    async def finish_current_scene(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+    ) -> TravelerPresence:
+        """Release the scene lease without changing the queued destination."""
+        presence = await self.ensure_presence(session, guild_id=guild_id)
+        presence.current_scene_engaged_until = datetime.now(UTC)
+        return presence
+
     async def set_summons_enabled(
         self,
         session: AsyncSession,
@@ -360,6 +402,11 @@ class PresenceService:
 
         presence = await self.ensure_presence(session, guild_id=guild_id)
         if presence.movement_locked:
+            return None
+        if (
+            presence.current_scene_engaged_until is not None
+            and presence.current_scene_engaged_until > datetime.now(UTC)
+        ):
             return None
 
         target: SceneConfig | None = None
@@ -428,6 +475,8 @@ class PresenceService:
         presence.current_location_id = scene.location_id
         presence.current_location_name = scene.location_name
         presence.arrived_at = datetime.now(UTC)
+        presence.current_scene_engaged_until = None
+        presence.last_interaction_at = None
 
     @staticmethod
     def _clear_current(presence: TravelerPresence) -> None:
@@ -436,6 +485,8 @@ class PresenceService:
         presence.current_location_id = None
         presence.current_location_name = None
         presence.arrived_at = None
+        presence.current_scene_engaged_until = None
+        presence.last_interaction_at = None
 
     @staticmethod
     def _clear_next(presence: TravelerPresence) -> None:

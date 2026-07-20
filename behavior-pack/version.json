@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0",
-  "base_architecture": "0.8.0",
+  "version": "1.0.0",
+  "base_architecture": "1.0.0",
   "updated_at": "2026-07-19",
   "description": "Grounded partial lore, full Stranger persona, Discord world-news/location knowledge, memory and knowledge-gap administration"
 }

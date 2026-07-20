@@ -373,6 +373,9 @@ class StrangerOrchestrator:
             profession_mask_id=scene.profession_mask_id,
             message_id=incoming.discord_message_id,
             content=incoming.content,
+            scene_id=scene.scene_id,
+            location_id=scene.location_id,
+            referenced_message_id=incoming.referenced_message_id,
         )
         await session.flush()
 
@@ -386,6 +389,9 @@ class StrangerOrchestrator:
             location_name=context.location_name,
             facts_allowed=[],
             memories_allowed=memories,
+            cortex=context.cortex,
+            recalled_memories=context.recalled_memories,
+            recalled_testimonies=context.recalled_testimonies,
             max_length_words=180,
         )
 
@@ -415,6 +421,9 @@ class StrangerOrchestrator:
                 location_name=context.location_name,
                 facts_allowed=facts,
                 memories_allowed=[self._memory_for_actor(memory) for memory in context.memories[:2]],
+                cortex=context.cortex,
+                recalled_memories=context.recalled_memories,
+                recalled_testimonies=context.recalled_testimonies,
                 max_length_words=230,
             ),
             citations,
@@ -476,6 +485,9 @@ class StrangerOrchestrator:
                 facts_allowed=allowed,
                 facts_forbidden=forbidden_labels,
                 memories_allowed=[self._memory_for_actor(memory) for memory in context.memories[:2]],
+                cortex=context.cortex,
+                recalled_memories=context.recalled_memories,
+                recalled_testimonies=context.recalled_testimonies,
                 disclosure_offer=offer,
                 max_length_words=220,
             ),

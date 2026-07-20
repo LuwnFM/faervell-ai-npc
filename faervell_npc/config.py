@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     discord_gm_role_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     discord_admin_channel_id: int | None = None
     discord_gm_review_channel_id: int | None = None
-    discord_character_registry_channel_id: int | None = None
+    discord_character_registry_channel_id: int | None = 707461395209256982
+    character_registry_auto_sync_enabled: bool = True
+    character_registry_sync_interval_hours: int = Field(default=48, ge=24, le=168)
     discord_command_prefix: str = "!"
 
     database_url: str = "postgresql+asyncpg://faervell:faervell@localhost:5432/faervell"
@@ -73,6 +75,31 @@ class Settings(BaseSettings):
     planner_daily_budget_usd: float = 2.0
     planner_escalation_enabled: bool = True
 
+    # Traveler Memory v2 / 1.0.0 feature gates.  The defaults are safe for a
+    # staged rollout: local writes and reads can be enabled independently.
+    traveler_memory_v2_enabled: bool = True
+    traveler_memory_v2_write_enabled: bool = True
+    traveler_memory_v2_read_enabled: bool = True
+    memory_personal_enabled: bool = True
+    memory_testimony_enabled: bool = True
+    memory_world_testimony_enabled: bool = True
+    memory_claims_enabled: bool = True
+    memory_evidence_enabled: bool = True
+    memory_adaptive_context_enabled: bool = True
+    memory_context_reserve_mode: str = "adaptive"
+    memory_include_low_score_when_space: bool = True
+    memory_dedup_vector_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
+    memory_dedup_lexical_threshold: float = Field(default=0.72, ge=0.0, le=1.0)
+    memory_candidate_pool: int = Field(default=64, ge=8, le=500)
+    memory_graph_enabled: bool = False
+    memory_llm_update_enabled: bool = False
+    memory_background_life_enabled: bool = False
+    memory_allow_cross_character_testimony: bool = True
+    memory_require_attribution: bool = True
+    memory_multiple_sources_confirm: bool = False
+    memory_canon_overrides_testimony: bool = True
+    model_context_length: int = Field(default=8192, ge=1024)
+
     log_level: str = "INFO"
     default_language: str = "ru"
     pseudonym_secret: str = "change-me-in-production"
@@ -89,6 +116,10 @@ class Settings(BaseSettings):
     )
     traveler_presence_enabled: bool = True
     traveler_movement_interval_seconds: int = Field(default=600, ge=30)
+    # A queued summons never interrupts an active RP scene. Each handled
+    # interaction extends this lease; the movement loop may leave only after
+    # the scene has been quiet for this grace period (or a GM explicitly ends it).
+    traveler_scene_settle_seconds: int = Field(default=900, ge=0, le=86400)
     traveler_default_appearance_probability: float = Field(default=0.20, ge=0.0, le=1.0)
     traveler_summon_move_chance: float = Field(default=0.75, ge=0.0, le=1.0)
     traveler_cross_location_min_score: float = Field(default=0.58, ge=0.0, le=1.0)
@@ -111,7 +142,7 @@ class Settings(BaseSettings):
         default_factory=lambda: [730030732185043004, 1490668605594013776]
     )
     knowledge_auto_ingest: bool = True
-    knowledge_min_wiki_documents: int = Field(default=500, ge=1)
+    knowledge_min_wiki_documents: int = Field(default=689, ge=1)
     knowledge_stale_hours: int = Field(default=24, ge=1)
     fandom_api_concurrency: int = Field(default=4, ge=1, le=12)
     fandom_batch_size: int = Field(default=40, ge=1, le=50)

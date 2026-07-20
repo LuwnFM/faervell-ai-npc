@@ -1,0 +1,20 @@
+{
+  "source_folder_id": "11Grkxpk1WQ37YDCvXeCDri0D7tNjy34X",
+  "source_url": "https://drive.google.com/drive/folders/11Grkxpk1WQ37YDCvXeCDri0D7tNjy34X",
+  "coverage_km2": 49985000,
+  "approx_km2_per_pixel": 1.51,
+  "maps": [
+    {"file_id": "12njYuFB5-O-hohN0sCUht_SRHpXWDwE7", "name": "Карта мира Фаервелла — Государства", "kind": "political"},
+    {"file_id": "1Davnt0im7DZSlQnFESgKcOOC2bg1JWlf", "name": "Карта мира Фаервелла — Морозные Пустоши", "kind": "regional"},
+    {"file_id": "1ZIc32maIghg8Zo9xPVLkBANqjCIdJoGo", "name": "Карта мира Фаервелла — Топография", "kind": "topography"},
+    {"file_id": "1xRFdKz4fk43BFQV9JotNdTQIEuRv9gkb", "name": "Карта мира Фаервелла — последний вариант", "kind": "world"},
+    {"file_id": "1UtoTMatXpsRJP5Y8PRdWnjXbzZqZN8cZ", "name": "Карта мира Фаервелла — Названия", "kind": "labels"},
+    {"file_id": "1WaSyWroUmFE4m2ba3Vb4lzf9qEJoaemr", "name": "Морская логистика ФВ", "kind": "sea_routes"},
+    {"file_id": "1_w0pjvb52vownMoOMAeEDY3t4xNjrdCC", "name": "Сухопутная логистика Анатора", "kind": "land_routes_anator"},
+    {"file_id": "1qQl2Edguz2DrpxK0z0db2yVclZyKWcdr", "name": "Сухопутная логистика ФВ", "kind": "land_routes"},
+    {"file_id": "19sW2BD2LHumK1YKFwfgmrc4-wn0H2XaG", "name": "Экономические сферы ФВ", "kind": "economic_zones"}
+  ],
+  "notes_file_id": "1IK-ZOpTLGNR35rE7dIypBu5igFDoblXI",
+  "climate_map_is_special_case": true,
+  "access_mode": "public_view"
+}

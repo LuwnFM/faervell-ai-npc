@@ -8,6 +8,7 @@ from faervell_npc.services.characters import CharacterRegistryService
 from faervell_npc.services.context import SceneContextBuilder
 from faervell_npc.services.decision_cache import DecisionCacheService
 from faervell_npc.services.disclosure import LoreDisclosureEngine
+from faervell_npc.services.economy import EconomyService
 from faervell_npc.services.examples import ApprovedExampleService
 from faervell_npc.services.guard import OutputGuard
 from faervell_npc.services.knowledge import KnowledgeService
@@ -20,7 +21,6 @@ from faervell_npc.services.presence import PresenceService
 from faervell_npc.services.router import IntentRouter
 from faervell_npc.services.rules import RuleEngine
 from faervell_npc.services.tools import ToolExecutor
-from faervell_npc.services.v080_runtime import install_v080_runtime
 
 
 @dataclass(slots=True)
@@ -30,6 +30,7 @@ class Runtime:
     characters: CharacterRegistryService
     presence: PresenceService
     knowledge: KnowledgeService
+    economy: EconomyService
     orchestrator: StrangerOrchestrator
 
     async def close(self) -> None:
@@ -44,10 +45,11 @@ def build_runtime() -> Runtime:
     contexts = SceneContextBuilder(memory, characters)
     router = IntentRouter()
     knowledge = KnowledgeService()
+    economy = EconomyService()
     disclosure = LoreDisclosureEngine()
     rules = RuleEngine()
     llm = OpenRouterClient()
-    tools = ToolExecutor(knowledge, rules, disclosure)
+    tools = ToolExecutor(knowledge, rules, disclosure, economy=economy)
     examples = ApprovedExampleService()
     planner = PlannerService(llm, tools, examples)
     local_planner = LocalPlanner(tools)
@@ -65,16 +67,6 @@ def build_runtime() -> Runtime:
         decision_cache=decision_cache,
         actor=actor,
         guard=guard,
-    )
-    # FAERVELL_V080:runtime
-    install_v080_runtime(
-        planner=planner,
-        orchestrator=orchestrator,
-        actor=actor,
-        guard=guard,
-        rules=rules,
-        characters=characters,
-        local_planner=local_planner,
     )
     return Runtime(
         llm=llm,

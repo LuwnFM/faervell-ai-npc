@@ -46,7 +46,7 @@ class SourceIngestor:
         self.embedder = get_embedder()
         self.http = httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=15.0),
-            headers={"User-Agent": "Faervell-AI-NPC/0.7 knowledge-importer (+https://github.com/LuwnFM/faervell-ai-npc)"},
+            headers={"User-Agent": "Faervell-AI-NPC/1.0.0 knowledge-importer (+https://github.com/LuwnFM/faervell-ai-npc)"},
             follow_redirects=True,
         )
         self.page_errors: list[dict[str, Any]] = []

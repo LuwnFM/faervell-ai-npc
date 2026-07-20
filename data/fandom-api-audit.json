@@ -1,0 +1,30 @@
+{
+  "api": "https://faervellrp.fandom.com/ru/api.php",
+  "siteinfo_stats": {
+    "pages": 2144,
+    "articles": 700,
+    "edits": 10927,
+    "images": 1178
+  },
+  "all_namespace0_pages": 724,
+  "redirect_pages": 25,
+  "nonredirect_articles": 699,
+  "readable_articles": 689,
+  "empty_revision_count": 10,
+  "empty_titles": [
+    "Амилон",
+    "Бледноликая Дева",
+    "Гниголот",
+    "Горуля",
+    "Горбун",
+    "Клерк",
+    "Лесной Хищник",
+    "Лешачиха",
+    "Песнепевец Бездонный",
+    "Фиаллетник"
+  ],
+  "max_content_chars": 149357,
+  "min_content_chars": 0,
+  "status": "OK",
+  "note": "Compare this audit with the wiki statistics endpoint; allpages/nonredirects intentionally excludes redirects and may differ by one due to MediaWiki statistics lag."
+}

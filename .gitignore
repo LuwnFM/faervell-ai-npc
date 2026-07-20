@@ -14,3 +14,5 @@ postgres_data/
 redis_data/
 data/exports/
 data/behavior-patches/
+work/
+data/economy/economy.sqlite3

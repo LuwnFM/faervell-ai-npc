@@ -82,6 +82,18 @@ async def init_db() -> None:
                 "ADD COLUMN IF NOT EXISTS locked_channel_id VARCHAR(32)"
             )
         )
+        await conn.execute(
+            text(
+                "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS current_scene_engaged_until TIMESTAMPTZ"
+            )
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE traveler_presence "
+                "ADD COLUMN IF NOT EXISTS last_interaction_at TIMESTAMPTZ"
+            )
+        )
         await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS category_id VARCHAR(32)"))
         await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS category_name VARCHAR(256)"))
         await conn.execute(text("ALTER TABLE scene_configs ADD COLUMN IF NOT EXISTS location_path VARCHAR(512)"))
@@ -98,6 +110,64 @@ async def init_db() -> None:
         )
         await conn.execute(
             text("ALTER TABLE model_calls ADD COLUMN IF NOT EXISTS response_metadata JSONB NOT NULL DEFAULT '{}'::jsonb")
+        )
+        await conn.execute(
+            text(
+                "ALTER TABLE character_profiles ADD COLUMN IF NOT EXISTS "
+                "sheet_fields JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+        )
+        # Memory v2 is additive and idempotent. Existing 0.8 rows remain valid.
+        memory_columns = {
+            "traveler_entity_id": "VARCHAR(64) NOT NULL DEFAULT 'traveler_01'",
+            "scope_type": "VARCHAR(32) NOT NULL DEFAULT 'PERSONAL'",
+            "normalized_content": "TEXT NOT NULL DEFAULT ''",
+            "content_hash": "VARCHAR(64) NOT NULL DEFAULT ''",
+            "claim_id": "VARCHAR(36)",
+            "speaker_character_id": "VARCHAR(128)",
+            "speaker_display_name": "VARCHAR(256)",
+            "subject_character_ids": "JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "subject_entity_keys": "JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "participant_character_ids": "JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "mentioned_dates": "JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "novelty_score": "DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+            "reinforcement_count": "INTEGER NOT NULL DEFAULT 0",
+            "corroboration_count": "INTEGER NOT NULL DEFAULT 0",
+            "access_count": "INTEGER NOT NULL DEFAULT 0",
+            "last_accessed_at": "TIMESTAMPTZ",
+            "last_reinforced_at": "TIMESTAMPTZ",
+            "is_anchor": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "is_cherished": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "lifecycle_status": "VARCHAR(16) NOT NULL DEFAULT 'ACTIVE'",
+            "why_saved": "TEXT NOT NULL DEFAULT ''",
+            "attribution_mode": "VARCHAR(24) NOT NULL DEFAULT 'ATTRIBUTABLE'",
+            "disclosure_scope": "VARCHAR(24) NOT NULL DEFAULT 'PUBLIC'",
+            "confidentiality": "VARCHAR(24) NOT NULL DEFAULT 'PUBLIC'",
+            "source_message_id": "VARCHAR(32)",
+            "source_quest_id": "VARCHAR(36)",
+            "source_scene_id": "VARCHAR(64)",
+            "source_location_id": "VARCHAR(128)",
+            "version": "INTEGER NOT NULL DEFAULT 1",
+            "updated_at": "TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        }
+        for column, definition in memory_columns.items():
+            await conn.execute(
+                text(
+                    "ALTER TABLE traveler_character_memories "
+                    f"ADD COLUMN IF NOT EXISTS {column} {definition}"
+                )
+            )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_memory_character_lifecycle "
+                "ON traveler_character_memories(character_id, lifecycle_status)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_memory_scope_lifecycle "
+                "ON traveler_character_memories(scope_type, lifecycle_status)"
+            )
         )
         await conn.execute(
             text(

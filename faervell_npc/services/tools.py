@@ -19,6 +19,7 @@ from faervell_npc.models import (
 )
 from faervell_npc.schemas import Corpus, QuestDraft, ToolRequest
 from faervell_npc.services.disclosure import DisclosureContext, LoreDisclosureEngine
+from faervell_npc.services.economy import EconomyService
 from faervell_npc.services.knowledge import KnowledgeService
 from faervell_npc.services.rules import RuleEngine
 
@@ -31,10 +32,13 @@ class ToolExecutor:
         knowledge: KnowledgeService,
         rules: RuleEngine,
         disclosure: LoreDisclosureEngine,
+        *,
+        economy: EconomyService | None = None,
     ) -> None:
         self.knowledge = knowledge
         self.rules = rules
         self.disclosure = disclosure
+        self.economy = economy or EconomyService()
 
     async def execute_all(
         self,
@@ -138,11 +142,38 @@ class ToolExecutor:
             return self._deterministic_weather(location_id or "unknown", args.get("game_date"))
 
         if request.name == "get_market_price":
+            item = str(args.get("item_id") or args.get("item_name") or "").strip()
+            if not item:
+                raise ValueError("item_id is required")
+            prices = await self.economy.search_prices(
+                item,
+                country=str(args.get("economic_zone_id") or "").strip() or None,
+                limit=5,
+            )
+            if not prices:
+                return {
+                    "status": "UNKNOWN_STRUCTURED_PRICE",
+                    "item_id": item,
+                    "zone_id": args.get("economic_zone_id"),
+                    "instruction": "Exact price is absent; ask GM or provide a more specific item name.",
+                }
             return {
-                "status": "UNKNOWN_STRUCTURED_PRICE",
-                "item_id": args.get("item_id"),
+                "status": "EXACT_PUBLIC_ECONOMY_PRICE",
+                "item_id": item,
                 "zone_id": args.get("economic_zone_id"),
-                "instruction": "Use exact MECHANICS evidence or ask GM; never invent a price.",
+                "prices": [
+                    {
+                        "country": price.country,
+                        "category": price.category,
+                        "item_name": price.item_name,
+                        "price_otn": price.price_otn,
+                        "price_currency": price.price_currency,
+                        "quantity": price.quantity,
+                        "description": price.description,
+                        "source_url": price.source_url,
+                    }
+                    for price in prices
+                ],
             }
 
         if request.name == "check_inventory":

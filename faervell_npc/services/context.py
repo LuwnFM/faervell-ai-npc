@@ -61,6 +61,13 @@ class SceneContextBuilder:
             character_id=character_id,
             query=incoming.content,
         )
+        cortex = await self.memory.build_cortex_context(
+            session,
+            character_id=character_id,
+            scene_id=scene.scene_id,
+            query=incoming.content,
+            route="CHAT",
+        )
         relationship = await self.memory.get_or_create_relationship(session, character_id)
         active_quests = (
             await session.execute(
@@ -100,6 +107,9 @@ class SceneContextBuilder:
                 for msg in recent
             ],
             memories=memories,
+            cortex=cortex.model_dump(mode="json"),
+            recalled_memories=[item.model_dump(mode="json") for item in cortex.recalled_memories],
+            recalled_testimonies=[item.model_dump(mode="json") for item in cortex.recalled_testimonies],
             active_quests=[
                 {
                     "id": quest.id,

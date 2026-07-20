@@ -1173,6 +1173,7 @@ class FaervellBot(commands.Bot):
         self._knowledge_bootstrap_done = False
         self._views_restored = False
         self._presence_task: asyncio.Task[None] | None = None
+        self._character_registry_task: asyncio.Task[None] | None = None
 
     async def setup_hook(self) -> None:
         await self.add_cog(StrangerCommands(self, self.runtime))
@@ -1463,6 +1464,14 @@ class FaervellBot(commands.Bot):
             self._registry_bootstrap_done = True
             asyncio.create_task(
                 self._bootstrap_character_registry(), name="character-registry-bootstrap"
+            )
+        if (
+            self.settings.character_registry_auto_sync_enabled
+            and self.settings.discord_character_registry_channel_id is not None
+            and (self._character_registry_task is None or self._character_registry_task.done())
+        ):
+            self._character_registry_task = asyncio.create_task(
+                self._character_registry_loop(), name="character-registry-periodic-sync"
             )
 
     async def _bootstrap_knowledge(self) -> None:
@@ -2053,6 +2062,10 @@ class FaervellBot(commands.Bot):
             self._presence_task.cancel()
             await asyncio.gather(self._presence_task, return_exceptions=True)
             self._presence_task = None
+        if self._character_registry_task is not None:
+            self._character_registry_task.cancel()
+            await asyncio.gather(self._character_registry_task, return_exceptions=True)
+            self._character_registry_task = None
         await super().close()
 
     async def on_message(self, message: discord.Message) -> None:
@@ -2168,6 +2181,11 @@ class FaervellBot(commands.Bot):
         async with self.runtime.locks.lock(channel_id):
             async with message.channel.typing():
                 async with SessionLocal() as session:
+                    await self.runtime.presence.touch_current_scene(
+                        session,
+                        guild_id=str(message.guild.id),
+                        channel_id=channel_id,
+                    )
                     result = await self.runtime.orchestrator.process(session, incoming)
 
             await self._send_process_result(message, scene, result)
@@ -2327,6 +2345,27 @@ class FaervellBot(commands.Bot):
                 )
         except Exception as exc:
             print(f"Character registry bootstrap failed: {type(exc).__name__}: {exc}")
+
+    async def _character_registry_loop(self) -> None:
+        """Refresh the canonical character channel every 24–168 hours."""
+        interval = max(24, self.settings.character_registry_sync_interval_hours) * 3600
+        await asyncio.sleep(interval)
+        while not self.is_closed():
+            channel_id = self.settings.discord_character_registry_channel_id
+            if channel_id is None:
+                return
+            try:
+                report = await self.sync_character_registry(channel_id, full=True)
+                print(
+                    "Character registry periodic sync: "
+                    f"imported={report['imported']} skipped={report['skipped']} "
+                    f"deactivated={report['deactivated']}"
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"Character registry periodic sync failed: {type(exc).__name__}: {exc}")
+            await asyncio.sleep(interval)
 
     async def sync_character_registry(
         self,

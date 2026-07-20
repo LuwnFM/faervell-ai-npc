@@ -50,6 +50,18 @@ class OutputGuard:
             if mention and mention.casefold() not in lowered:
                 violations.append(f"missing_required_mention:{mention[:60]}")
 
+        attribution_markers = ("по словам", "мне рассказывали", "я слышал", "говорил", "утверждал", "слух")
+        for testimony in packet.recalled_testimonies:
+            status = str(testimony.get("trust_status", ""))
+            mode = str(testimony.get("attribution_mode", ""))
+            speaker = str(testimony.get("speaker_name") or "").strip()
+            content = str(testimony.get("content") or "").strip()
+            if mode in {"ANONYMOUS", "PRIVATE"} and speaker and speaker.casefold() in lowered:
+                violations.append("forbidden_testimony_source")
+            if content and content.casefold() in lowered and status not in {"CONFIRMED", "OBSERVED"}:
+                if not any(marker in lowered for marker in attribution_markers):
+                    violations.append("testimony_presented_as_fact")
+
         modern = sorted(term for term in self.MODERNISMS if term in lowered)
         if modern:
             violations.append("modernisms:" + ",".join(modern))

@@ -36,6 +36,45 @@ _FIELD_PATTERNS: dict[str, tuple[str, ...]] = {
     "height_text": (r"(?im)^\s*(?:2\.3\s*)?рост\s*:\s*(.+?)\s*$",),
 }
 
+_SHEET_LABELS = {
+    "игрок": "player",
+    "имя персонажа": "canonical_name",
+    "прозвище": "alias",
+    "псевдоним": "alias",
+    "раса персонажа и ее подвид": "race",
+    "раса персонажа и её подвид": "race",
+    "раса": "race",
+    "возраст": "age_text",
+    "пол": "sex",
+    "рост": "height_text",
+    "вес": "weight_text",
+    "телосложение": "body_type",
+    "травмы": "injuries",
+    "болезни": "diseases",
+    "страхи": "fears",
+    "предпочтения": "preferences",
+    "привычки": "habits",
+    "принципы": "principles",
+    "вероисповедание": "religion",
+    "навыки и перки": "skills",
+    "баффы": "buffs",
+    "дебаффы": "debuffs",
+    "характер": "personality",
+    "магия": "magic",
+    "вид мага": "mage_type",
+    "биография": "biography",
+    "инвентарь": "inventory",
+    "имущество": "property",
+    "недвижимость": "real_estate",
+    "экипировка": "equipment",
+    "валюта": "currency",
+    "магические предметы": "magical_items",
+    "книги": "books",
+    "напарники": "companions",
+    "напарники нпс": "companions",
+    "внешность": "appearance",
+}
+
 _APPEARANCE_HEADER_RE = re.compile(r"(?is)(?:^|\n)\s*внешность\s*:\s*(.+)$")
 _IMAGE_MARKER_RE = re.compile(r"(?im)^\s*(?:изображение|арт|референс)\s*$")
 _PRESENTATION_PATTERNS = (
@@ -102,6 +141,7 @@ class ParsedCharacterSheet:
     appearance: str
     visible_profile: str
     searchable_identity: str
+    fields: dict[str, str]
 
 
 @dataclass(slots=True)
@@ -141,6 +181,20 @@ class CharacterSheetParser:
         height_text = cls._clean(cls._field(normalized, "height_text"))
         height_cm = cls._parse_height_cm(height_text)
         appearance = cls._appearance(normalized)
+        fields = cls._parse_all_fields(normalized)
+        fields.setdefault("canonical_name", canonical_name)
+        if alias_text and cls._meaningful(alias_text):
+            fields.setdefault("alias", alias_text)
+        if race:
+            fields.setdefault("race", race)
+        if age_text:
+            fields.setdefault("age_text", age_text)
+        if sex:
+            fields.setdefault("sex", sex)
+        if height_text:
+            fields.setdefault("height_text", height_text)
+        if appearance:
+            fields["appearance"] = appearance
 
         visible_parts = [f"Имя: {canonical_name}"]
         if len(aliases) > 1:
@@ -158,7 +212,16 @@ class CharacterSheetParser:
 
         visible_profile = "\n".join(visible_parts)
         searchable_identity = "\n".join(
-            [canonical_name, " ".join(aliases), race or "", height_text or "", appearance]
+            [
+                canonical_name,
+                " ".join(aliases),
+                race or "",
+                height_text or "",
+                appearance,
+                fields.get("personality", ""),
+                fields.get("magic", ""),
+                fields.get("mage_type", ""),
+            ]
         ).strip()
         return ParsedCharacterSheet(
             canonical_name=canonical_name,
@@ -171,6 +234,7 @@ class CharacterSheetParser:
             appearance=appearance,
             visible_profile=visible_profile,
             searchable_identity=searchable_identity,
+            fields=fields,
         )
 
     @staticmethod
@@ -191,6 +255,46 @@ class CharacterSheetParser:
         if marker:
             appearance = appearance[: marker.start()].strip()
         return re.sub(r"\n{3,}", "\n\n", appearance)[:8000]
+
+    @staticmethod
+    def _parse_all_fields(text: str) -> dict[str, str]:
+        """Parse published Russian sheet labels and preserve their free text."""
+        fields: dict[str, str] = {}
+        current: str | None = None
+        buffer: list[str] = []
+        label_re = re.compile(r"^\s*(?:\d+(?:\.\d+)?\s*)?([^:]{2,90})\s*:\s*(.*)$")
+
+        def flush() -> None:
+            nonlocal buffer, current
+            if current is not None:
+                value = re.sub(r"\n{3,}", "\n\n", "\n".join(buffer)).strip()
+                if value:
+                    fields[current] = value[:20000]
+            buffer = []
+
+        for raw_line in text.replace("\r", "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith(("▬▬", "══", "---")):
+                flush()
+                continue
+            match = label_re.match(line)
+            if match:
+                label = match.group(1).casefold().replace("ё", "е")
+                label = re.sub(r"[-–—]+", " ", label)
+                label = re.sub(r"\s+", " ", label).strip()
+                key = _SHEET_LABELS.get(label)
+                if key is not None:
+                    flush()
+                    current = key
+                    if match.group(2).strip():
+                        buffer.append(match.group(2).strip())
+                    continue
+            if current is not None:
+                buffer.append(line)
+        flush()
+        return fields
 
     @staticmethod
     def _clean(value: str | None) -> str | None:
@@ -274,6 +378,7 @@ class CharacterRegistryService:
             "visible_profile": parsed.visible_profile,
             "full_sheet": text,
             "attachment_urls": attachment_urls,
+            "sheet_fields": parsed.fields,
             "identity_embedding": self.embedder.embed(parsed.searchable_identity),
             "active": True,
             "source_created_at": source_created_at,
