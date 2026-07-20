@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from faervell_npc.discord_bot import FaervellBot
 from faervell_npc.models import GMReviewRequest, Quest, QuestObjective
 from faervell_npc.schemas import (
     ActorPacket,
@@ -20,7 +21,6 @@ from faervell_npc.schemas import (
     ToolRequest,
 )
 from faervell_npc.services.actor import ActorService
-from faervell_npc.discord_bot import FaervellBot
 from faervell_npc.services.quest_rewards import QuestRewardService, RewardPreference
 from faervell_npc.services.template_library import TemplateRecord
 
@@ -175,7 +175,7 @@ def _choose_offer(planner: Any, message: str, context: SceneContext) -> Template
     }
     safe = [item for item in candidates if item.quest_type in safe_types] or candidates
     digest = hashlib.sha256(
-        f"{context.character_id}:{context.scene_id}:{message}".encode("utf-8")
+        f"{context.character_id}:{context.scene_id}:{message}".encode()
     ).digest()
     return sorted(safe, key=lambda item: item.id)[int.from_bytes(digest[:4], "big") % len(safe)]
 
@@ -565,7 +565,7 @@ def install_v100_hotfix(runtime: Any) -> None:
     actor.render = MethodType(render, actor)
 
     if not getattr(ActorService, "_v100_public_packet_installed", False):
-        setattr(ActorService, "_v100_public_packet_installed", True)
+        ActorService._v100_public_packet_installed = True
         original_public_packet = ActorService._public_packet
         ActorService._public_packet = staticmethod(  # type: ignore[method-assign]
             lambda packet: _public_packet_strict(original_public_packet, packet)
@@ -613,7 +613,7 @@ def install_v100_hotfix(runtime: Any) -> None:
     tools._create_review_request = MethodType(create_review_request, tools)
 
     if not getattr(FaervellBot, "_v100_gm_lock_installed", False):
-        setattr(FaervellBot, "_v100_gm_lock_installed", True)
+        FaervellBot._v100_gm_lock_installed = True
         original_post_review = FaervellBot._post_gm_review
 
         async def post_review_locked(self: Any, review_id: str) -> tuple[bool, str]:
