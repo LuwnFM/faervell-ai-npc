@@ -75,16 +75,16 @@ class QuestService:
             if objective is not None:
                 objective.status = "COMPLETED"
         if normalized_event in {"completed", "declined", "failed"}:
-            open_threads = []
+            open_threads: list[TravelerOpenThread] = []
             if hasattr(session, "execute"):
-                open_threads = (
+                open_threads = list((
                     await session.execute(
                         select(TravelerOpenThread).where(
                             TravelerOpenThread.related_quest_id == quest.id,
                             TravelerOpenThread.status == "OPEN",
                         )
                     )
-                ).scalars().all()
+                ).scalars().all())
             thread_status = {
                 "completed": "RESOLVED",
                 "declined": "CANCELLED",

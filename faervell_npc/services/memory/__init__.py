@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from faervell_npc.models import (
     TravelerMemory,
 )
 from faervell_npc.schemas import MemoryHit, MemoryPerspective, TrustStatus
+from faervell_npc.services.cache import SceneLockManager
 from faervell_npc.services.embeddings import get_embedder
 
 from .archive import TravelerMemoryArchiveService
@@ -25,6 +27,7 @@ from .schemas import (
     CortexRenderBudget,
     MemoryCandidate,
     MemoryRecallQuery,
+    MemoryRoute,
     TestimonyCandidate,
 )
 from .testimony import TravelerTestimonyContextService
@@ -52,7 +55,7 @@ class MemoryService:
         r"монет\w*|корол\w*|рынк\w*|культ\w*|правител\w*|событ\w*)\b"
     )
 
-    def __init__(self, *, lock_manager: object | None = None) -> None:
+    def __init__(self, *, lock_manager: SceneLockManager | None = None) -> None:
         self.settings = get_settings()
         self.embedder = get_embedder()
         self.writer = MemoryWriter()
@@ -317,7 +320,12 @@ class MemoryService:
             return CortexContext()
         return await self.cortex.get_context(
             session,
-            query=MemoryRecallQuery(active_character_id=character_id, scene_id=scene_id, text=query, route=route),
+            query=MemoryRecallQuery(
+                active_character_id=character_id,
+                scene_id=scene_id,
+                text=query,
+                route=cast(MemoryRoute, route.upper()),
+            ),
             budget=CortexRenderBudget(
                 model_id="runtime", context_length=getattr(self.settings, "model_context_length", 8192),
                 reserved_output_tokens=self.settings.actor_max_tokens,

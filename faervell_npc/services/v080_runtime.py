@@ -637,9 +637,9 @@ def _install_behavior_scan() -> None:
         latest: dict[tuple[str, str, str], datetime] = {}
         for kind, model, error, created_at in errors:
             clean = scrub_model_error(str(error or ""))
-            key = (str(kind), str(model), clean)
-            error_counts[key] += 1
-            latest[key] = max(created_at, latest.get(key, created_at))
+            error_key = (str(kind), str(model), clean)
+            error_counts[error_key] += 1
+            latest[error_key] = max(created_at, latest.get(error_key, created_at))
 
         return {
             "generated_at": datetime.now(UTC).isoformat(),
@@ -664,7 +664,7 @@ def _install_behavior_scan() -> None:
             ),
         }
 
-    BehaviorManager.scan = scan
+    BehaviorManager.scan = scan  # type: ignore[method-assign]
 
 
 def _install_actor_policy(actor: Any) -> None:

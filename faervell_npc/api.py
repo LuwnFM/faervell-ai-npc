@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import Body, FastAPI, HTTPException
 from sqlalchemy import text
@@ -10,7 +11,7 @@ from faervell_npc.config import get_settings
 from faervell_npc.db import SessionLocal, init_db
 from faervell_npc.models import MemoryClaim, TravelerMemory
 from faervell_npc.runtime import Runtime, build_runtime
-from faervell_npc.services.memory.schemas import CortexRenderBudget, MemoryRecallQuery
+from faervell_npc.services.memory.schemas import CortexRenderBudget, MemoryRecallQuery, MemoryRoute
 
 
 def create_app(
@@ -204,17 +205,34 @@ def create_app(
         payload: dict[str, object] = Body(default_factory=dict),
     ) -> dict[str, object]:
         async with SessionLocal() as session:
+            raw_route = str(payload.get("route") or "CHAT").upper()
+            route = cast(
+                MemoryRoute,
+                raw_route if raw_route in {"CHAT", "LORE", "MECHANICS", "PLANNER"} else "CHAT",
+            )
+            raw_entity_keys = payload.get("entity_keys", [])
+            entity_keys = [str(item) for item in raw_entity_keys] if isinstance(raw_entity_keys, list) else []
+
+            def payload_int(name: str, default: int) -> int:
+                value = payload.get(name)
+                if isinstance(value, (int, float, str)):
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        pass
+                return default
+
             query = MemoryRecallQuery(
                 active_character_id=character_id,
                 scene_id=str(payload.get("scene_id")) if payload.get("scene_id") else None,
                 text=str(payload.get("query") or ""),
-                route=str(payload.get("route") or "CHAT"),
-                entity_keys=[str(item) for item in payload.get("entity_keys", [])],
+                route=route,
+                entity_keys=entity_keys,
             )
             budget = CortexRenderBudget(
                 model_id=str(payload.get("model_id") or "runtime"),
-                context_length=int(payload.get("context_length") or settings.model_context_length),
-                reserved_output_tokens=int(payload.get("reserved_output_tokens") or settings.actor_max_tokens),
+                context_length=payload_int("context_length", settings.model_context_length),
+                reserved_output_tokens=payload_int("reserved_output_tokens", settings.actor_max_tokens),
             )
             context = await owned_runtime.orchestrator.memory.cortex.get_context(
                 session, query=query, budget=budget

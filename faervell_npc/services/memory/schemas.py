@@ -14,6 +14,8 @@ from .enums import (
     MemoryTrust,
 )
 
+MemoryRoute = Literal["CHAT", "LORE", "MECHANICS", "PLANNER"]
+
 
 class MemoryCandidate(BaseModel):
     traveler_entity_id: str = "traveler_01"
@@ -65,7 +67,7 @@ class MemoryRecallQuery(BaseModel):
     scene_id: str | None = None
     location_id: str | None = None
     text: str = ""
-    route: Literal["CHAT", "LORE", "MECHANICS", "PLANNER"] = "CHAT"
+    route: MemoryRoute = "CHAT"
     active_quest_ids: list[str] = Field(default_factory=list)
     query_character_ids: list[str] = Field(default_factory=list)
     entity_keys: list[str] = Field(default_factory=list)

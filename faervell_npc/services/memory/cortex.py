@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from faervell_npc.models import TravelerCortexSnapshot
+from faervell_npc.services.cache import SceneLockManager
 
 from .cortex_builder import CortexBuilderService
 from .cortex_renderer import CortexRenderer
@@ -18,7 +19,7 @@ class TravelerCortexService:
         *,
         builder: CortexBuilderService | None = None,
         recall: MemoryRecallService | None = None,
-        lock_manager: object | None = None,
+        lock_manager: SceneLockManager | None = None,
         testimony: TravelerTestimonyContextService | None = None,
     ) -> None:
         self.builder = builder or CortexBuilderService()
@@ -50,7 +51,7 @@ class TravelerCortexService:
                 return await self.builder.rebuild_snapshot(
                     session,
                     character_id=query.active_character_id,
-                    reason=(current.dirty_reason if current else "missing"),
+                    reason=(current.dirty_reason or "dirty") if current else "missing",
                     traveler_entity_id=query.traveler_entity_id,
                 )
             return current

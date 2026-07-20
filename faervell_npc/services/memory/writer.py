@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,7 +85,7 @@ class MemoryWriter:
                 # relation graph can connect them later without collapsing
                 # their evidence into a false consensus.
                 decision = candidate_decision
-        action = "CREATED"
+        action: Literal["CREATED", "REINFORCED", "EVIDENCE_ADDED", "CONFLICT_CREATED", "REJECTED"] = "CREATED"
         conflict = bool(decision and decision.conflict)
         if claim is None:
             action = "CONFLICT_CREATED" if conflict else "CREATED"

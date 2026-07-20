@@ -578,7 +578,7 @@ def _clean_message(content: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _scene_path(channel: discord.TextChannel | discord.Thread) -> str:
+def _scene_path(channel: discord.TextChannel | discord.ForumChannel | discord.Thread) -> str:
     parent = channel.parent if isinstance(channel, discord.Thread) else None
     category = getattr(channel, "category", None) or (
         getattr(parent, "category", None) if parent is not None else None

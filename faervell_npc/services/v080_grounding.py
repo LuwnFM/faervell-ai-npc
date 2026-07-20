@@ -503,10 +503,10 @@ def _extract_query_entities(query: str) -> list[str]:
             result.append(item)
     if not result:
         # Player messages are often all lower-case. Pick noun-like words after entity labels.
-        match = re.search(
+        fallback_match = re.search(
             r"(?iu)\b(?:королевств|республик|импери|континент|страна|город)\w*\s+([а-яё][а-яё'’\-]{3,})",
             query,
         )
-        if match:
-            result.append(match.group(1).capitalize())
+        if fallback_match:
+            result.append(fallback_match.group(1).capitalize())
     return _unique(result)

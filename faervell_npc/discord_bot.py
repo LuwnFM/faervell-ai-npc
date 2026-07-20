@@ -1058,7 +1058,7 @@ class StrangerCommands(commands.Cog):
                 for binding in bindings:
                     if binding.active or binding.character_id not in names:
                         names[binding.character_id] = binding.character_name
-                grouped: dict[str, dict[str, object]] = {}
+                grouped: dict[str, dict[str, int | str]] = {}
                 for memory in memories:
                     item = grouped.setdefault(memory.character_id, {"count": 0, "latest": ""})
                     item["count"] = int(item["count"]) + 1
@@ -1123,7 +1123,7 @@ class StrangerCommands(commands.Cog):
                     bindings_changed = len(bindings)
                     identities_changed = len(identities)
                 await session.commit()
-                removed = max(0, int(memory_result.rowcount or 0))
+                removed = max(0, int(getattr(memory_result, "rowcount", 0) or 0))
                 await interaction.response.send_message(
                     f"Очищена производная память `{character_id}`: **{removed}** записей. "
                     f"Привязок отключено: **{bindings_changed}**, сценических личностей: "
