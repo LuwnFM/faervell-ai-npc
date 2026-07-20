@@ -18,19 +18,10 @@ test -s data/economy/economy.sqlite3 || {
 }
 
 chmod 600 .env
-if [[ -f scripts/migrate-v0.7.sh ]]; then
-  bash scripts/migrate-v0.7.sh "$APP_DIR/.env"
-fi
-if [[ -f scripts/migrate-v0.7.3.sh ]]; then
-  bash scripts/migrate-v0.7.3.sh "$APP_DIR/.env"
-fi
-if [[ -f scripts/migrate-v0.7.4.sh ]]; then
-  bash scripts/migrate-v0.7.4.sh "$APP_DIR/.env"
-fi
-
-if [[ -f scripts/migrate-v0.8.0.sh ]]; then
-  bash scripts/migrate-v0.8.0.sh "$APP_DIR/.env"
-fi
+# The v1 release is a full application rebuild over the existing persistent
+# volumes.  Legacy migrators include version-pinned release verifiers and must
+# not be replayed against a 1.0.0 source tree.  The v1 migrator is idempotent
+# and preserves every unrelated production setting and secret in .env.
 if [[ -f scripts/migrate-v1.0.0.sh ]]; then
   bash scripts/migrate-v1.0.0.sh "$APP_DIR/.env"
 fi
