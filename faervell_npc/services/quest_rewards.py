@@ -143,13 +143,55 @@ QUEST_REWARD_MULTIPLIERS: dict[str, tuple[float, float]] = {
     "CRAFT_ITEM": (4.0, 10.0),
     "REPAIR_OBJECT": (4.0, 10.0),
     "PREPARE_MEDICINE": (5.0, 12.0),
-    "ACTIVATE_PORTAL": (10.0, 24.0),
     "STABILIZE_ANOMALY": (12.0, 28.0),
     "RECOVER_LOST_ITEM": (5.0, 13.0),
     "RECOVER_RELIC": (10.0, 25.0),
     "LORE_EXCHANGE": (5.0, 12.0),
     "TRADE_REQUEST": (3.0, 8.0),
 }
+
+
+_CURRENCY_SUFFIXES = (
+    "иями",
+    "ями",
+    "ами",
+    "ого",
+    "его",
+    "ому",
+    "ему",
+    "ыми",
+    "ими",
+    "иях",
+    "их",
+    "ие",
+    "ые",
+    "ах",
+    "ях",
+    "ов",
+    "ев",
+    "ей",
+    "ой",
+    "ий",
+    "ый",
+    "ая",
+    "яя",
+    "ое",
+    "ее",
+    "ую",
+    "юю",
+    "ам",
+    "ям",
+    "ом",
+    "ем",
+    "а",
+    "я",
+    "ы",
+    "и",
+    "у",
+    "ю",
+    "е",
+    "о",
+)
 
 
 class QuestRewardService:
@@ -159,6 +201,31 @@ class QuestRewardService:
     @staticmethod
     def normalize(value: str) -> str:
         return " ".join(re.sub(r"[^a-zа-яё0-9]+", " ", value.casefold()).split())
+
+    @classmethod
+    def token_stems(cls, value: str) -> set[str]:
+        stems: set[str] = set()
+        for token in cls.normalize(value).split():
+            stem = token
+            for suffix in _CURRENCY_SUFFIXES:
+                if stem.endswith(suffix) and len(stem) - len(suffix) >= 4:
+                    stem = stem[: -len(suffix)]
+                    break
+            if len(stem) >= 4:
+                stems.add(stem)
+        return stems
+
+    @classmethod
+    def currency_matches(cls, text: str, system: CurrencySystem) -> bool:
+        query_stems = cls.token_stems(text)
+        if not query_stems:
+            return False
+        candidates = (system.name, *(coin.name for coin in system.coins))
+        for candidate in candidates:
+            candidate_stems = cls.token_stems(candidate)
+            if candidate_stems and len(query_stems & candidate_stems) >= min(2, len(candidate_stems)):
+                return True
+        return False
 
     @staticmethod
     def parse_otn(value: object) -> float | None:
@@ -185,7 +252,9 @@ class QuestRewardService:
             return RewardPreference(mode="OTN")
         for system in CURRENCY_SYSTEMS:
             names = (system.name, *(coin.name for coin in system.coins), *system.territories)
-            if any(self.normalize(name) in normalized for name in names):
+            if any(self.normalize(name) in normalized for name in names) or self.currency_matches(
+                text, system
+            ):
                 return RewardPreference(mode="CURRENCY", currency=system)
         local = self.currencies_for_location(location)
         if len(local) == 1 and re.search(r"\b(?:монет|деньг|местн\w+\s+валют)\w*", normalized):
@@ -201,6 +270,9 @@ class QuestRewardService:
             QuestRewardService.normalize(name) in normalized
             for system in CURRENCY_SYSTEMS
             for name in (system.name, *(coin.name for coin in system.coins))
+        ) or any(
+            QuestRewardService.currency_matches(text, system)
+            for system in CURRENCY_SYSTEMS
         )
 
     def _country_filters(self, location: str) -> tuple[str, ...]:
@@ -282,7 +354,7 @@ class QuestRewardService:
         rows = await asyncio.to_thread(self._price_rows_sync, location)
         candidates: list[tuple[float, str]] = []
         seen: set[str] = set()
-        for country, item_name, price_otn, _price_currency, quantity in rows:
+        for country, item_name, price_otn, _price_currency, _quantity in rows:
             parsed = self.parse_otn(price_otn)
             clean_name = item_name.strip()
             if parsed is None or not clean_name or clean_name.casefold() in seen:
@@ -291,11 +363,10 @@ class QuestRewardService:
             count = max(1, int(round(amount_otn / parsed)))
             total_otn = parsed * count
             delta = abs(total_otn - amount_otn) / max(float(amount_otn), 1.0)
-            unit_text = f"; базовая единица: {quantity}" if quantity.strip() else ""
             candidates.append(
                 (
                     delta,
-                    f"{count} × {clean_name} — {total_otn:g} ОТН, {country}{unit_text}",
+                    f"{count} × {clean_name} ({country})",
                 )
             )
         candidates.sort(key=lambda item: item[0])
@@ -317,10 +388,18 @@ class QuestRewardService:
         )
         minimum = self._round_otn(reference * low_multiplier)
         maximum = max(minimum, self._round_otn(reference * high_multiplier))
-        digest = hashlib.sha256(seed.encode("utf-8")).digest()
+        digest = hashlib.sha256(seed.encode()).digest()
         fraction = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
         base = self._round_otn(minimum + (maximum - minimum) * fraction)
         base = min(maximum, max(minimum, base))
+
+        if preference.mode == "OTN":
+            local = self.currencies_for_location(location)
+            preference = (
+                RewardPreference(mode="CURRENCY", currency=local[0])
+                if len(local) == 1
+                else RewardPreference(mode="ITEM")
+            )
 
         if preference.mode == "ITEM":
             items = await self.item_equivalents(base, location)
@@ -331,9 +410,7 @@ class QuestRewardService:
                 maximum_otn=maximum,
                 base_otn=base,
                 mode="ITEM",
-                reward_text=(
-                    f"предметный эквивалент стоимостью около {base} ОТН: {item_text}"
-                ),
+                reward_text=f"товаром сопоставимой стоимости: {item_text}",
                 item_candidates=items,
             )
 
@@ -351,10 +428,7 @@ class QuestRewardService:
                 maximum_otn=maximum,
                 base_otn=base,
                 mode="CURRENCY",
-                reward_text=(
-                    f"{rendered} — эквивалент {base} ОТН "
-                    f"(диапазон поручения {minimum}–{maximum} ОТН)"
-                ),
+                reward_text=rendered,
                 currency_name=preference.currency.name,
                 coin_breakdown=breakdown,
             )
@@ -364,7 +438,6 @@ class QuestRewardService:
             minimum_otn=minimum,
             maximum_otn=maximum,
             base_otn=base,
-            mode="OTN",
-            reward_text=f"{base} ОТН (диапазон поручения {minimum}–{maximum} ОТН)",
-            currency_name="ОТН",
+            mode="ITEM",
+            reward_text="товаром сопоставимой стоимости",
         )

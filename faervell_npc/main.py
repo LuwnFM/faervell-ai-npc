@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, cast
 
 import uvicorn
 
@@ -9,7 +10,12 @@ from faervell_npc.config import get_settings
 from faervell_npc.db import close_db, init_db
 from faervell_npc.discord_bot import FaervellBot
 from faervell_npc.runtime import build_runtime
-from faervell_npc.services.v100_hotfix import HOTFIX_VERSION, install_v100_hotfix
+from faervell_npc.services.v100_hotfix import install_v100_hotfix
+from faervell_npc.services.v101_retrieval_hotfix import install_v101_retrieval_hotfix
+from faervell_npc.services.v103_unified_hotfix import (
+    UNIFIED_HOTFIX_VERSION,
+    install_v103_unified_hotfix,
+)
 
 
 async def run() -> None:
@@ -19,15 +25,20 @@ async def run() -> None:
 
     runtime = build_runtime()
     install_v100_hotfix(runtime)
+    install_v101_retrieval_hotfix(runtime)
+    install_v103_unified_hotfix(runtime)
+    orchestrator = cast(Any, runtime.orchestrator)
     api = create_app(runtime, manage_runtime=False, initialize_schema=False)
 
     @api.get("/version")
     async def version() -> dict[str, object]:
         return {
             "version": "1.0.0",
-            "hotfix": HOTFIX_VERSION,
+            "hotfix": UNIFIED_HOTFIX_VERSION,
             "templates": len(runtime.templates.all()),
             "economy_index": runtime.economy.path.is_file(),
+            "synonym_index": orchestrator.synonym_lexicon.available,
+            "retrieval_safety": True,
         }
 
     server = uvicorn.Server(

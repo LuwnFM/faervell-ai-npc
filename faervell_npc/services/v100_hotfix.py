@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from types import MethodType
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
@@ -60,7 +60,6 @@ _ITEM_NAMES = {
     "CRAFT_ITEM": "заказанное изделие",
     "REPAIR_OBJECT": "ремонтные материалы",
     "PREPARE_MEDICINE": "лекарство",
-    "ACTIVATE_PORTAL": "настроечный камень",
     "RECOVER_LOST_ITEM": "утерянную вещь",
     "RECOVER_RELIC": "реликвию",
 }
@@ -91,7 +90,6 @@ _DESCRIPTIONS = {
     "CRAFT_ITEM": "Изготовить заказанное изделие по подтверждённым условиям.",
     "REPAIR_OBJECT": "Починить указанный объект и подтвердить его исправность.",
     "PREPARE_MEDICINE": "Приготовить лекарство по точному рецепту без неподтверждённых замен.",
-    "ACTIVATE_PORTAL": "Подготовить узел портала к безопасному запуску, не открывая его без разрешения.",
     "STABILIZE_ANOMALY": "Стабилизировать пространственную аномалию и подтвердить результат наблюдением.",
     "RECOVER_LOST_ITEM": "Найти утерянную вещь и вернуть её владельцу.",
     "RECOVER_RELIC": "Найти реликвию, сохранить её целой и доставить для проверки.",
@@ -128,13 +126,35 @@ def _recent_player_quest(context: SceneContext, current_message: str) -> str | N
     return None
 
 
+def _forbidden_quest_template(template: TemplateRecord) -> bool:
+    quest_type = str(template.quest_type or "").upper()
+    searchable = " ".join(
+        (
+            quest_type,
+            str(template.text or ""),
+            str(template.quest_archetype_title or ""),
+        )
+    ).casefold()
+    return quest_type == "ACTIVATE_PORTAL" or bool(
+        re.search(r"(?iu)\b(?:портал|телепорт)\w*", searchable)
+    )
+
+
+def _sanitize_quest_public_text(text: str) -> str:
+    cleaned = re.sub(r"(?iu)\b(?:ОТН|экономическ(?:ая|ой|ую|ий|ого)\s+(?:база|индекс)|индекс\s+экономики)\b", "", text)
+    cleaned = re.sub(r"(?iu)\b(?:портал|телепорт)\w*", "дорога", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r" \n", "\n", cleaned)
+    return cleaned.strip()
+
+
 def _choose_offer(planner: Any, message: str, context: SceneContext) -> TemplateRecord | None:
     selected = planner.templates.choose_offer(
         player_message=message,
         profession_mask_id=context.profession_mask_id,
         available_variables=_TEMPLATE_VARIABLES,
     )
-    if selected is not None:
+    if selected is not None and not _forbidden_quest_template(selected):
         return selected
 
     candidates = [
@@ -144,6 +164,7 @@ def _choose_offer(planner: Any, message: str, context: SceneContext) -> Template
         and item.event == "offer"
         and item.library_status != "REJECTED_PERSONA"
         and set(item.required_variables).issubset(_TEMPLATE_VARIABLES)
+        and not _forbidden_quest_template(item)
     ]
     if not candidates:
         return None
@@ -321,8 +342,8 @@ async def _build_quest_packet(
     if quote is None:
         text = (
             "Странник закрывает счётную книжку.\n\n"
-            "— Экономический индекс сейчас недоступен. Я не стану выдумывать цену. "
-            "Вернёмся к поручению, когда смогу проверить стоимость в ОТН."
+            "— Сейчас я не могу надёжно сверить размер платы. Выдумывать цену не стану. "
+            "Вернёмся к поручению, когда расчёт снова будет доступен."
         )
         return ActorPacket(
             response_type=ResponseType.DIALOGUE,
@@ -345,12 +366,7 @@ async def _build_quest_packet(
         quest_type,
         f"Выполнить проверяемое поручение в районе {destination} и вернуться с результатом.",
     )
-    reward_note = (
-        f"Базовая стоимость награды: {quote.base_otn} ОТН. "
-        f"Расчётный диапазон этого поручения: "
-        f"{quote.minimum_otn}–{quote.maximum_otn} ОТН. "
-        f"Способ выплаты: {quote.reward_text}."
-    )
+    reward_note = f"Плата после выполнения: {quote.reward_text}."
     quest = QuestDraft(
         title=title,
         template_id=template.id,
@@ -382,7 +398,7 @@ async def _build_quest_packet(
         ToolRequest(
             name="commit_quest",
             arguments=quest.model_dump_json(),
-            purpose="Создать проверяемый проект задания с наградой, рассчитанной через ОТН",
+            purpose="Создать проверяемый проект задания с подтверждённой наградой",
         ),
         scene_id=context.scene_id,
         character_id=context.character_id,
@@ -417,7 +433,13 @@ async def _build_quest_packet(
         quest_type=quest_type,
         reward_text=quote.reward_text,
     )
-    rendered = template.text.format_map(values).strip()
+    rendered = _sanitize_quest_public_text(template.text.format_map(values))
+    if not rendered or re.search(r"(?iu)\b(?:портал|телепорт)\w*", rendered):
+        rendered = (
+            "Странник раскрывает карту и отмечает на ней обычный сухопутный путь.\n\n"
+            f"— Есть поручение в районе {destination}: {description} "
+            f"Плата после выполнения — {quote.reward_text}."
+        )
     rendered += (
         "\n\n— Условия записаны без изменений. "
         "Я вернусь с окончательным словом, когда они будут подтверждены."
@@ -507,8 +529,8 @@ def install_v100_hotfix(runtime: Any) -> None:
             text = (
                 "Странник раскрывает небольшую счётную книжку.\n\n"
                 f"— Прежде чем закрепить поручение, скажи, как удобнее получить награду: "
-                f"{local_text}, ОТН или предметами равной стоимости? "
-                "Я сначала рассчитаю диапазон по ценам экономической базы, а затем переведу сумму."
+                f"{local_text} или товаром сопоставимой стоимости? "
+                "Размер платы я назову после сверки условий поручения."
             )
             return ActorPacket(
                 response_type=ResponseType.DIALOGUE,
@@ -564,10 +586,11 @@ def install_v100_hotfix(runtime: Any) -> None:
 
     actor.render = MethodType(render, actor)
 
-    if not getattr(ActorService, "_v100_public_packet_installed", False):
-        ActorService._v100_public_packet_installed = True
-        original_public_packet = ActorService._public_packet
-        ActorService._public_packet = staticmethod(  # type: ignore[method-assign]
+    actor_service_cls = cast(Any, ActorService)
+    if not getattr(actor_service_cls, "_v100_public_packet_installed", False):
+        actor_service_cls._v100_public_packet_installed = True
+        original_public_packet = actor_service_cls._public_packet
+        actor_service_cls._public_packet = staticmethod(
             lambda packet: _public_packet_strict(original_public_packet, packet)
         )
 
@@ -612,15 +635,16 @@ def install_v100_hotfix(runtime: Any) -> None:
 
     tools._create_review_request = MethodType(create_review_request, tools)
 
-    if not getattr(FaervellBot, "_v100_gm_lock_installed", False):
-        FaervellBot._v100_gm_lock_installed = True
-        original_post_review = FaervellBot._post_gm_review
+    bot_cls = cast(Any, FaervellBot)
+    if not getattr(bot_cls, "_v100_gm_lock_installed", False):
+        bot_cls._v100_gm_lock_installed = True
+        original_post_review = bot_cls._post_gm_review
 
         async def post_review_locked(self: Any, review_id: str) -> tuple[bool, str]:
             async with self.runtime.locks.lock(f"gm-review:{review_id}"):
                 return await original_post_review(self, review_id)
 
-        FaervellBot._post_gm_review = post_review_locked  # type: ignore[method-assign]
+        bot_cls._post_gm_review = post_review_locked
 
         def quest_decision_text(
             *,
@@ -665,12 +689,9 @@ def install_v100_hotfix(runtime: Any) -> None:
                     + "."
                 )
             if reward_note:
-                clean_note = re.sub(
-                    r"(?iu)\bДиапазон для типа [A-Z_]+:\s*",
-                    "Расчётный диапазон: ",
-                    reward_note,
-                )
-                lines.append(clean_note)
+                clean_note = _sanitize_quest_public_text(reward_note)
+                if clean_note:
+                    lines.append(clean_note)
             else:
                 reward = dict(quest.reward or {}) if quest is not None else {}
                 amount = reward.get("amount")
@@ -680,6 +701,4 @@ def install_v100_hotfix(runtime: Any) -> None:
             lines.append("— Можешь отправляться, когда будешь готова.")
             return "\n".join(lines)
 
-        FaervellBot._quest_decision_text = staticmethod(  # type: ignore[method-assign]
-            quest_decision_text
-        )
+        bot_cls._quest_decision_text = staticmethod(quest_decision_text)
