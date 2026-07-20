@@ -487,7 +487,9 @@ class PresenceService:
             passed = [
                 scene
                 for scene in scenes
-                if self.rng.random() <= max(0.0, min(1.0, scene.appearance_probability))
+                if self.rng.random() <= max(
+                    0.0, min(1.0, scene.appearance_probability or 0.0)
+                )
             ]
             if passed:
                 target = self._weighted_choice(passed)
@@ -528,7 +530,9 @@ class PresenceService:
         return scenes
 
     def _weighted_choice(self, scenes: list[SceneConfig]) -> SceneConfig:
-        weights = [max(0.001, min(1.0, scene.appearance_probability)) for scene in scenes]
+        weights = [
+            max(0.001, min(1.0, scene.appearance_probability or 0.0)) for scene in scenes
+        ]
         total = sum(weights)
         pick = self.rng.random() * total
         running = 0.0

@@ -26,6 +26,14 @@ def test_cross_location_ping_classifier_schedules_meaningful_summon() -> None:
     assert assessment.score >= service.settings.traveler_cross_location_min_score
 
 
+def test_weighted_choice_accepts_legacy_null_probability() -> None:
+    service = PresenceService()
+    first = SimpleNamespace(appearance_probability=None)
+    second = SimpleNamespace(appearance_probability=0.5)
+
+    assert service._weighted_choice([first, second]) in (first, second)
+
+
 def test_reply_hint_is_spoilered_only_on_last_post() -> None:
     class DummyBot:
         settings = SimpleNamespace(discord_reply_hint_text="Пинганите меня или ответьте на пост.")

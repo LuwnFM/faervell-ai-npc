@@ -55,6 +55,13 @@ async def init_db() -> None:
                 "NOT NULL DEFAULT 0.20"
             )
         )
+        # Existing 0.8 databases could still contain NULL in this column.
+        await conn.execute(
+            text(
+                "UPDATE scene_configs SET appearance_probability = 0.20 "
+                "WHERE appearance_probability IS NULL"
+            )
+        )
         await conn.execute(
             text(
                 "ALTER TABLE scene_configs "

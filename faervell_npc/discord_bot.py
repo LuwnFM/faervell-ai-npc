@@ -945,7 +945,7 @@ class StrangerCommands(commands.Cog):
             )
             lines.insert(
                 5,
-                f"Шанс появления здесь: **{scene.appearance_probability * 100:.1f}%** за цикл",
+                f"Шанс появления здесь: **{(scene.appearance_probability or 0.0) * 100:.1f}%** за цикл",
             )
             lines.insert(
                 6,
@@ -1418,7 +1418,9 @@ class FaervellBot(commands.Bot):
                 scene.category_name = category_name
                 scene.location_path = location_path
                 scene.automatic_appearance_allowed = automatic
-                if automatic and scene.appearance_probability <= 0:
+                # Older 0.8 rows could contain NULL before this column became
+                # non-nullable. Initialise that legacy value during refresh.
+                if automatic and (scene.appearance_probability or 0.0) <= 0:
                     scene.appearance_probability = (
                         self.settings.traveler_default_appearance_probability
                     )
