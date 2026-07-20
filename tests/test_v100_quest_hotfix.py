@@ -73,7 +73,8 @@ async def test_item_reward_comes_from_price_index(tmp_path: Path) -> None:
     )
     assert quote is not None
     assert quote.item_candidates
-    assert any("ОТН" in item for item in quote.item_candidates)
+    assert all("ОТН" not in item for item in quote.item_candidates)
+    assert "ОТН" not in quote.reward_text
 
 
 def test_currency_converter_uses_official_otn_values() -> None:
@@ -93,3 +94,32 @@ def test_preference_parser_recognizes_items_and_currency() -> None:
     assert preference is not None
     assert preference.currency is not None
     assert preference.currency.name == "Ивелтинская валюта"
+    inflected = service.parse_preference("В златарнах ивелтинских", "Ивелтин")
+    assert inflected is not None
+    assert inflected.currency is not None
+    assert inflected.currency.name == "Ивелтинская валюта"
+    assert service.looks_like_preference("В златарнах ивелтинских")
+
+
+@pytest.mark.asyncio
+async def test_internal_otn_preference_is_rendered_as_local_currency(tmp_path: Path) -> None:
+    database = tmp_path / "economy.sqlite3"
+    _economy(database)
+    service = QuestRewardService(database)
+    quote = await service.quote(
+        quest_type="DELIVER_ITEM",
+        location="Республика Ивелтин",
+        preference=RewardPreference(mode="OTN"),
+        seed="stable",
+    )
+    assert quote is not None
+    assert quote.mode == "CURRENCY"
+    assert quote.currency_name == "Ивелтинская валюта"
+    assert "ОТН" not in quote.reward_text
+    assert "экономичес" not in quote.reward_text.casefold()
+
+
+def test_portal_quest_type_is_not_reward_enabled() -> None:
+    from faervell_npc.services.quest_rewards import QUEST_REWARD_MULTIPLIERS
+
+    assert "ACTIVATE_PORTAL" not in QUEST_REWARD_MULTIPLIERS
